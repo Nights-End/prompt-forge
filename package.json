@@ -1,0 +1,25 @@
+{
+  "name": "prompt-forge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev --workspace @prompt-forge/api",
+    "dev:web": "npm run dev --workspace @prompt-forge/web",
+    "build": "npm run build --workspace @prompt-forge/shared && npm run build --workspace @prompt-forge/api && npm run build --workspace @prompt-forge/web",
+    "start": "npm run start --workspace @prompt-forge/api",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

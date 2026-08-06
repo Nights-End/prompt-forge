@@ -1,0 +1,13 @@
+.page {
+  max-width: 720px;
+}
+
+.title {
+  font-size: 24px;
+  margin: 0 0 16px;
+}
+
+.error {
+  color: var(--danger);
+  margin-bottom: 12px;
+}

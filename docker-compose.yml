@@ -1,0 +1,49 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      # Optional cloud API key, injected at runtime. Never baked into images.
+      PF_LLM_API_KEY: ${PF_LLM_API_KEY:-}
+    # SQLite data, uploads/, and provider config persisted in a named volume
+    volumes:
+      - api-data:/app/apps/api/data
+    # not exposed to the host; web proxies /api to it over the Docker network
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+  # Optional Ollama service. Start with:
+  #   docker compose --profile ollama up -d
+  # then set the local provider baseUrl to http://ollama:11434/v1 in Settings.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    # GPU passthrough (requires NVIDIA container toolkit); remove or comment out
+    # the deploy block on CPU-only hosts.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  api-data:
+  ollama-data:

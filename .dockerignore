@@ -1,0 +1,17 @@
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+apps/api/data
+**/data/*.db
+**/data/*.db-*
+.git
+.gitignore
+**/.gitignore
+*.log
+.env
+.env.*
+Dockerfile
+docker-compose.yml
+README.md
+PLAN.md

@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# SQLite data (persisted via Docker volume)
+apps/api/data/*.db
+apps/api/data/*.db-*
+
+# Uploaded asset files (persisted via Docker volume)
+apps/api/data/uploads/
+
+# Local provider config (contains API keys; never commit)
+apps/api/data/provider.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env
+.env
+.env.local
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
