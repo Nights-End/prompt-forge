@@ -7,19 +7,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
+# pnpm is the package manager (package-lock.json is not used anymore)
+RUN npm install -g pnpm@10 --no-audit --no-fund
+
 # Copy manifests first for better layer caching
-COPY package.json package-lock.json tsconfig.base.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 
 # Copy sources
 COPY packages/shared packages/shared
 COPY apps/api apps/api
 
 # Build shared package (types) then the API
-RUN npm run build --workspace @prompt-forge/shared \
-    && npm run build --workspace @prompt-forge/api
+RUN pnpm --filter @prompt-forge/shared build \
+    && pnpm --filter @prompt-forge/api build
 
 # ---- Runtime stage ----
 FROM node:20-slim AS runtime

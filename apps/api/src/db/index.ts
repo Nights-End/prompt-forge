@@ -57,6 +57,42 @@ const MIGRATIONS: string[] = [
 
     CREATE INDEX IF NOT EXISTS idx_assets_promptId ON assets(promptId);
   `,
+  // v3: workshop conversations + messages
+  `
+    CREATE TABLE IF NOT EXISTS conversations (
+      id         TEXT PRIMARY KEY,
+      promptId   TEXT REFERENCES prompts(id) ON DELETE SET NULL,
+      title      TEXT NOT NULL DEFAULT '',
+      providerId TEXT NOT NULL DEFAULT 'cloud',
+      presetId   TEXT NOT NULL DEFAULT 'tags',
+      extraSystemPrompt TEXT NOT NULL DEFAULT '',
+      createdAt  TEXT NOT NULL,
+      updatedAt  TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_conversations_promptId ON conversations(promptId);
+
+    CREATE TABLE IF NOT EXISTS conversation_messages (
+      id             TEXT PRIMARY KEY,
+      conversationId TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      role           TEXT NOT NULL,
+      content        TEXT NOT NULL,
+      createdAt      TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_conversation
+      ON conversation_messages(conversationId, createdAt);
+  `,
+  // v4: search toggle + multimodal content
+  `
+    ALTER TABLE conversations ADD COLUMN enableSearch INTEGER NOT NULL DEFAULT 0;
+
+    ALTER TABLE conversation_messages ADD COLUMN multimodal_content TEXT;
+  `,
+  // v5: default prompt flag
+  `
+    ALTER TABLE prompts ADD COLUMN isDefault INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 function migrate(db: Database.Database): void {

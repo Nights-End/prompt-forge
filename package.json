@@ -8,13 +8,18 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
-    "dev:api": "npm run dev --workspace @prompt-forge/api",
-    "dev:web": "npm run dev --workspace @prompt-forge/web",
-    "build": "npm run build --workspace @prompt-forge/shared && npm run build --workspace @prompt-forge/api && npm run build --workspace @prompt-forge/web",
-    "start": "npm run start --workspace @prompt-forge/api",
-    "typecheck": "npm run typecheck --workspaces",
-    "test": "npm run test --workspaces --if-present"
+    "dev": "concurrently -n api,web -c blue,green \"pnpm:dev:api\" \"pnpm:dev:web\"",
+    "dev:api": "pnpm --filter @prompt-forge/api dev",
+    "dev:web": "pnpm --filter @prompt-forge/web dev",
+    "build": "pnpm --filter @prompt-forge/shared build && pnpm --filter @prompt-forge/api build && pnpm --filter @prompt-forge/web build",
+    "start": "pnpm --filter @prompt-forge/api start",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --if-present test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
   },
   "engines": {
     "node": ">=20"

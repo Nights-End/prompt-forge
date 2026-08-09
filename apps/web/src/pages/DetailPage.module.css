@@ -34,22 +34,30 @@
   margin: 0;
 }
 
+.btnIcon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .fav {
-  color: #ffd166;
+  color: var(--fav);
 }
 
 .headActions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .danger {
   color: var(--danger);
-  border-color: rgba(255, 92, 92, 0.4);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 .danger:hover {
-  background: rgba(255, 92, 92, 0.12);
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 60%, transparent);
 }
 
 .desc {
@@ -81,6 +89,7 @@
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0 0 24px;
+  box-shadow: var(--shadow-sm);
 }
 
 .renderSection {
@@ -88,6 +97,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px;
+  box-shadow: var(--shadow-sm);
 }
 
 .sectionTitle {
@@ -155,6 +165,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.assetCard:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  transform: translateY(-1px);
 }
 
 .assetImg {
@@ -162,6 +178,11 @@
   height: 160px;
   object-fit: cover;
   display: block;
+  transition: transform 0.2s ease;
+}
+
+.assetCard:hover .assetImg {
+  transform: scale(1.03);
 }
 
 .assetLink {
@@ -180,7 +201,7 @@
   position: absolute;
   top: 6px;
   right: 6px;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay);
   border: none;
   color: #fff;
   padding: 2px 8px;
@@ -189,5 +210,6 @@
 
 .assetDelete:hover {
   color: var(--danger);
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--overlay);
+  border: none;
 }

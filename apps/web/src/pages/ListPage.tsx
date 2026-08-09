@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
-import { Prompt } from '@prompt-forge/shared';
+import { Asset, Prompt } from '@prompt-forge/shared';
 import { Link, useNavigate } from 'react-router-dom';
 import styles from './ListPage.module.css';
 
 export default function ListPage() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [assetMap, setAssetMap] = useState<Record<string, Asset[]>>({});
   const [categories, setCategories] = useState<string[]>([]);
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('');
@@ -28,8 +29,17 @@ export default function ListPage() {
       ]);
       setPrompts(list);
       setCategories(cats);
+      if (list.length > 0) {
+        try {
+          setAssetMap(await api.listAssetsByPrompts(list.map((p) => p.id)));
+        } catch {
+          setAssetMap({});
+        }
+      } else {
+        setAssetMap({});
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load prompts');
+      setError(e instanceof Error ? e.message : '加载提示词失败');
     } finally {
       setLoading(false);
     }
@@ -40,7 +50,7 @@ export default function ListPage() {
   }, [load]);
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this prompt?')) return;
+    if (!confirm('删除这条提示词？')) return;
     await api.deletePrompt(id);
     load();
   }
@@ -60,11 +70,11 @@ export default function ListPage() {
     if (!file) return;
     try {
       const result = await api.importFile(file);
-      const parts = [`Imported ${result.imported} prompt(s)`];
-      if ('assets' in result) parts.push(`${result.assets} asset(s)`);
+      const parts = [`已导入 ${result.imported} 条提示词`];
+      if ('assets' in result) parts.push(`${result.assets} 个附件`);
       alert(parts.join(', '));
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Import failed');
+      alert(err instanceof Error ? err.message : '导入失败');
     }
     e.target.value = '';
     load();
@@ -76,12 +86,12 @@ export default function ListPage() {
         <input
           className={styles.search}
           type="search"
-          placeholder="Search prompts..."
+          placeholder="搜索提示词…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
         <select value={category} onChange={(e) => setCategory(e.target.value)}>
-          <option value="">All categories</option>
+          <option value="">全部分类</option>
           {categories.map((c) => (
             <option key={c} value={c}>
               {c}
@@ -94,11 +104,11 @@ export default function ListPage() {
             checked={favorite}
             onChange={(e) => setFavorite(e.target.checked)}
           />
-          Favorites only
+          只看收藏
         </label>
         <div className={styles.spacer} />
         <label className={styles.importBtn}>
-          Import
+          导入
           <input
             type="file"
             accept=".json,.zip,application/json,application/zip"
@@ -107,51 +117,81 @@ export default function ListPage() {
           />
         </label>
         <button className={styles.exportBtn} onClick={handleExport}>
-          Export
+          导出
         </button>
       </div>
 
       {error && <div className={styles.error}>{error}</div>}
-      {loading && <div className={styles.state}>Loading…</div>}
+      {loading && (
+        <ul className={styles.list} aria-hidden="true">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <li key={i} className={styles.skeletonCard}>
+              <div className={styles.skeletonThumb} />
+              <div className={styles.skeletonBody}>
+                <div
+                  className={styles.skeletonLine}
+                  style={{ width: `${60 + ((i * 13) % 30)}%` }}
+                />
+                <div className={styles.skeletonLine} style={{ width: '92%' }} />
+                <div className={styles.skeletonLine} style={{ width: '45%' }} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
       {!loading && prompts.length === 0 && (
         <div className={styles.state}>
-          No prompts yet. <Link to="/new">Create your first prompt</Link>.
+          还没有提示词。<Link to="/new">创建第一条提示词</Link>。
         </div>
       )}
 
       <ul className={styles.list}>
-        {prompts.map((p) => (
-          <li key={p.id} className={styles.card}>
-            <div className={styles.cardBody} onClick={() => navigate(`/prompts/${p.id}`)}>
-              <div className={styles.cardTitle}>
-                {p.isFavorite && <span className={styles.fav}>★</span>}
-                {p.title}
-              </div>
-              <div className={styles.cardContent}>{p.content}</div>
-              <div className={styles.meta}>
-                {p.category && <span className={styles.badge}>{p.category}</span>}
-                <span className={p.type === 'multimodal' ? styles.typeBadgeMultimodal : styles.badge}>
-                  {p.type === 'multimodal' ? 'multimodal' : 'text'}
-                </span>
-                {p.tags.map((t) => (
-                  <span key={t} className={styles.badge}>
-                    #{t}
-                  </span>
-                ))}
-                {p.variables.length > 0 && (
-                  <span className={styles.vars}>{p.variables.length} var(s)</span>
+        {prompts.map((p) => {
+          const thumbAsset = (assetMap[p.id] ?? []).find((a) => a.kind === 'image');
+          const thumb = thumbAsset ? api.assetFileUrl(thumbAsset.id) : null;
+          return (
+            <li key={p.id} className={styles.card}>
+              <div
+                className={styles.cardBody}
+                onClick={() => navigate(`/prompts/${p.id}`)}
+              >
+                {thumb && (
+                  <img className={styles.thumb} src={thumb} alt="" loading="lazy" />
                 )}
+                <div className={styles.cardTitle}>
+                  {p.isFavorite && <span className={styles.fav}>★</span>}
+                  {p.title}
+                </div>
+                <div className={styles.cardContent}>{p.content}</div>
+                <div className={styles.meta}>
+                  {p.category && <span className={styles.badge}>{p.category}</span>}
+                  <span
+                    className={
+                      p.type === 'multimodal' ? styles.typeBadgeMultimodal : styles.badge
+                    }
+                  >
+                    {p.type === 'multimodal' ? '多模态' : '文本'}
+                  </span>
+                  {p.tags.map((t) => (
+                    <span key={t} className={styles.badge}>
+                      #{t}
+                    </span>
+                  ))}
+                  {p.variables.length > 0 && (
+                    <span className={styles.vars}>{p.variables.length} 个变量</span>
+                  )}
+                </div>
               </div>
-            </div>
-            <button
-              className={styles.deleteBtn}
-              onClick={() => handleDelete(p.id)}
-              aria-label="Delete"
-            >
-              ✕
-            </button>
-          </li>
-        ))}
+              <button
+                className={styles.deleteBtn}
+                onClick={() => handleDelete(p.id)}
+                aria-label="删除"
+              >
+                ✕
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

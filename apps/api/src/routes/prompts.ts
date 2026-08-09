@@ -106,6 +106,24 @@ export function createPromptsRouter(
     });
   });
 
+  router.get('/default', (_req, res) => {
+    const prompt = repo.getDefault();
+    if (!prompt) {
+      res.status(404).json({ error: 'no default prompt set' });
+      return;
+    }
+    res.json(prompt);
+  });
+
+  router.post('/:id/default', (req, res) => {
+    const prompt = repo.setDefault(req.params.id);
+    if (!prompt) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json(prompt);
+  });
+
   router.get('/:id', (req, res) => {
     const prompt = repo.getById(req.params.id);
     if (!prompt) {

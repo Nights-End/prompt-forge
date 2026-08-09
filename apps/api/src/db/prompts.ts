@@ -176,6 +176,23 @@ export class PromptRepository {
     return result.changes > 0;
   }
 
+  setDefault(id: string): Prompt | null {
+    const existing = this.getById(id);
+    if (!existing) return null;
+    this.db.transaction(() => {
+      this.db.prepare('UPDATE prompts SET isDefault = 0').run();
+      this.db.prepare('UPDATE prompts SET isDefault = 1 WHERE id = ?').run(id);
+    })();
+    return this.getById(id);
+  }
+
+  getDefault(): Prompt | null {
+    const row = this.db
+      .prepare('SELECT * FROM prompts WHERE isDefault = 1 ORDER BY updatedAt DESC LIMIT 1')
+      .get() as PromptRow | undefined;
+    return row ? rowToPrompt(row) : null;
+  }
+
   categories(): string[] {
     const rows = this.db
       .prepare('SELECT DISTINCT category FROM prompts ORDER BY category ASC')

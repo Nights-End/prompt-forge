@@ -1,0 +1,6 @@
+export const WORKSHOP_HISTORY_LIMIT = 40;
+export const EXTRA_SYSTEM_PROMPT_MAX = 4000;
+export const IMAGE_MAX_DIMENSION = 1024;
+export const IMAGE_MAX_HISTORY = 5;
+export const SEARCH_TIMEOUT_MS = 8000;
+export const SEARCH_MAX_RESULT_CHARS = 3000;

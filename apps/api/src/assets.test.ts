@@ -166,3 +166,23 @@ test('upload without files is rejected', async () => {
   });
   expect(uploadRes.status).toBe(400);
 });
+
+test('batch assets by prompts returns grouped map', async () => {
+  const idA = await createPrompt('BatchPromptA');
+  const idB = await createPrompt('BatchPromptB');
+  for (const id of [idA, idB]) {
+    const form = new FormData();
+    form.append('files', new File([PNG], `img-${id}.png`, { type: 'image/png' }));
+    await fetch(`${base}/api/prompts/${id}/assets`, { method: 'POST', body: form });
+  }
+
+  const { status, data } = await json(
+    'GET',
+    `/api/assets/by-prompts?ids=${idA},${idB},does-not-exist`,
+  );
+  expect(status).toBe(200);
+  expect(data[idA]).toHaveLength(1);
+  expect(data[idA][0].kind).toBe('image');
+  expect(data[idB]).toHaveLength(1);
+  expect(data['does-not-exist']).toBeUndefined();
+});

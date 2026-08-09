@@ -37,41 +37,63 @@
 }
 
 .importBtn:hover {
-  background: #262b37;
+  background: color-mix(in srgb, var(--panel-2) 75%, var(--accent) 25%);
 }
 
 .list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 14px;
 }
 
 .card {
+  position: relative;
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
   gap: 8px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 0;
+  overflow: hidden;
+  transition: transform 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: var(--shadow-md);
 }
 
 .cardBody {
   flex: 1;
   cursor: pointer;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.thumb {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  height: auto;
+  object-fit: cover;
+  display: block;
+  background: var(--panel-2);
 }
 
 .cardTitle {
   font-weight: 600;
-  margin-bottom: 4px;
 }
 
 .fav {
-  color: #ffd166;
+  color: var(--fav);
 }
 
 .cardContent {
@@ -89,7 +111,7 @@
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  margin-top: 10px;
+  margin-top: auto;
   align-items: center;
 }
 
@@ -109,23 +131,78 @@
 
 .typeBadgeMultimodal {
   font-size: 12px;
-  color: #ffd166;
-  background: rgba(255, 209, 102, 0.1);
-  border: 1px solid rgba(255, 209, 102, 0.35);
+  color: var(--pink);
+  background: var(--pink-soft);
+  border: 1px solid color-mix(in srgb, var(--pink) 35%, transparent);
   padding: 2px 8px;
   border-radius: 999px;
 }
 
 .deleteBtn {
-  background: transparent;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--overlay);
   border: none;
-  color: var(--muted);
-  padding: 4px 8px;
+  color: #fff;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1;
 }
 
 .deleteBtn:hover {
-  color: var(--danger);
-  background: transparent;
+  color: #fff;
+  background: var(--danger);
+}
+
+.skeletonCard {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.skeletonThumb {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  background: color-mix(in srgb, var(--panel-2) 60%, var(--border));
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.skeletonBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.skeletonLine {
+  height: 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel-2) 60%, var(--border));
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.skeletonLine:first-child {
+  height: 16px;
+  width: 70%;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
 }
 
 .state {

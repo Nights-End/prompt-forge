@@ -17,16 +17,16 @@ export default function NewPromptPage() {
       }
       navigate(`/prompts/${prompt.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create');
+      setError(e instanceof Error ? e.message : '创建失败');
     }
   }
 
   return (
     <div className={styles.page}>
-      <h1 className={styles.title}>New Prompt</h1>
+      <h1 className={styles.title}>新建提示词</h1>
       {error && <div className={styles.error}>{error}</div>}
       <PromptForm
-        submitLabel="Create"
+        submitLabel="创建"
         onSubmit={handleSubmit}
         onCancel={() => navigate('/')}
       />

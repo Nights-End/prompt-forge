@@ -1,12 +1,18 @@
 import type {
   Asset,
+  Conversation,
+  ConversationMessage,
+  CreateConversationInput,
+  Preset,
   Prompt,
   PromptInput,
   ListPromptQuery,
   RenderResult,
 } from '@prompt-forge/shared';
+import { parseSseStream } from '@prompt-forge/shared';
 import type {
   ProviderId,
+  ProviderKind,
   ProviderPublicSettings,
   ProviderSettingsInput,
 } from '../types';
@@ -50,6 +56,9 @@ export const api = {
   listPrompts: (query: ListPromptQuery = {}) =>
     request<Prompt[]>(`/prompts${toQuery(query)}`),
   getPrompt: (id: string) => request<Prompt>(`/prompts/${id}`),
+  getDefaultPrompt: () => request<Prompt>('/prompts/default'),
+  setDefaultPrompt: (id: string) =>
+    request<Prompt>(`/prompts/${id}/default`, { method: 'POST' }),
   createPrompt: (input: PromptInput) =>
     request<Prompt>('/prompts', { method: 'POST', body: JSON.stringify(input) }),
   updatePrompt: (id: string, input: PromptInput) =>
@@ -64,6 +73,10 @@ export const api = {
     }),
   listAssets: (promptId: string) =>
     request<Asset[]>(`/prompts/${promptId}/assets`),
+  listAssetsByPrompts: (promptIds: string[]) =>
+    request<Record<string, Asset[]>>(
+      `/assets/by-prompts?ids=${promptIds.map(encodeURIComponent).join(',')}`,
+    ),
   uploadAssets: async (promptId: string, files: File[]) => {
     const form = new FormData();
     for (const file of files) form.append('files', file);
@@ -124,4 +137,165 @@ export const api = {
       '/settings/provider',
       { method: 'PUT', body: JSON.stringify({ providers }) },
     ),
+  fetchModels: (input: {
+    id: ProviderId;
+    kind: ProviderKind;
+    baseUrl: string;
+    apiKey?: string;
+  }) =>
+    request<{ models: string[] }>('/settings/provider/models', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  listConversations: (promptId?: string) =>
+    request<Conversation[]>(
+      `/workshop/conversations${promptId ? `?promptId=${encodeURIComponent(promptId)}` : ''}`,
+    ),
+  listPresets: () => request<Preset[]>('/workshop/presets'),
+  createPreset: (input: {
+    id: string;
+    name: string;
+    description: string;
+    instructions: string;
+  }) =>
+    request<Preset>('/workshop/presets', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updatePreset: (
+    id: string,
+    input: { name: string; description: string; instructions: string },
+  ) =>
+    request<Preset>(`/workshop/presets/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  deletePreset: (id: string) =>
+    request<void>(`/workshop/presets/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+  getWorkshopConfig: () =>
+    request<{ defaultExtraSystemPrompt: string }>('/workshop/config'),
+  saveWorkshopConfig: (patch: { defaultExtraSystemPrompt?: string }) =>
+    request<{ defaultExtraSystemPrompt: string }>('/workshop/config', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  createConversation: (input: CreateConversationInput) =>
+    request<Conversation>('/workshop/conversations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  getConversation: (id: string) =>
+    request<Conversation & { messages: ConversationMessage[] }>(
+      `/workshop/conversations/${id}`,
+    ),
+  updateConversation: (
+    id: string,
+    patch: {
+      title?: string;
+      providerId?: string;
+      presetId?: string;
+      extraSystemPrompt?: string;
+      enableSearch?: boolean;
+    },
+  ) =>
+    request<Conversation>(`/workshop/conversations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  deleteConversation: (id: string) =>
+    request<void>(`/workshop/conversations/${id}`, { method: 'DELETE' }),
+  undoConversation: (id: string) =>
+    request<{ removed: number }>(`/workshop/conversations/${id}/undo`, {
+      method: 'POST',
+    }),
+  streamChat: async (
+    conversationId: string,
+    body: { content: string; currentPrompt?: string; images?: string[] },
+    handlers: {
+      onChunk: (text: string) => void;
+      onDone: (payload: { content: string; model?: string }) => void;
+      onError: (message: string) => void;
+      onToolSearch?: (query: string) => void;
+    },
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/workshop/conversations/${conversationId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      });
+    } catch (e) {
+      if ((e as Error | null)?.name !== 'AbortError') {
+        handlers.onError(e instanceof Error ? e.message : 'Request failed');
+      }
+      return;
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      handlers.onError(
+        (data as { error?: string } | null)?.error ?? `Request failed (${res.status})`,
+      );
+      return;
+    }
+    if (!res.body) {
+      handlers.onError('Streaming is not supported by this browser');
+      return;
+    }
+    try {
+      let sawDone = false;
+      let sawError = false;
+      for await (const data of parseSseStream(res.body)) {
+        let evt: {
+          type?: string;
+          text?: string;
+          content?: string;
+          model?: string;
+          message?: string;
+          query?: string;
+        };
+        try {
+          evt = JSON.parse(data) as typeof evt;
+        } catch {
+          continue;
+        }
+        if (evt.type === 'chunk' && typeof evt.text === 'string') {
+          handlers.onChunk(evt.text);
+        } else if (evt.type === 'done') {
+          sawDone = true;
+          handlers.onDone({ content: evt.content ?? '', model: evt.model });
+        } else if (evt.type === 'error') {
+          sawError = true;
+          handlers.onError(evt.message ?? 'Unknown error');
+        } else if (evt.type === 'tool_search' && typeof evt.query === 'string') {
+          handlers.onToolSearch?.(evt.query);
+        }
+      }
+      if (!sawDone && !sawError && !signal?.aborted) {
+        handlers.onError('流式响应中断，未收到完整回复');
+      }
+    } catch (e) {
+      if (!signal?.aborted) {
+        handlers.onError(e instanceof Error ? e.message : 'Stream interrupted');
+      }
+    }
+  },
+  getSearchSettings: () =>
+    request<{ provider: string; hasApiKey: boolean; envApiKey: boolean }>(
+      '/settings/search',
+    ),
+  saveSearchSettings: (patch: { provider?: string; apiKey?: string | null }) =>
+    request<{ provider: string; hasApiKey: boolean; envApiKey: boolean }>(
+      '/settings/search',
+      { method: 'PUT', body: JSON.stringify(patch) },
+    ),
+  generateTitle: (content: string) =>
+    request<{ title: string; model?: string }>('/llm/title', {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
 };

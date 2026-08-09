@@ -8,32 +8,49 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px;
+  gap: 12px;
+  padding: 0 24px;
+  height: var(--header-h);
   border-bottom: 1px solid var(--border);
-  background: var(--panel);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
   z-index: 10;
 }
 
 .brand {
-  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 17px;
   font-weight: 700;
   color: var(--text);
   letter-spacing: 0.2px;
 }
 
+.brand svg {
+  color: var(--accent);
+}
+
+.brand:hover {
+  color: var(--text);
+}
+
 .nav {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .navLink {
   color: var(--muted);
   font-size: 14px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s ease, background-color 0.15s ease;
 }
 
 .navLink:hover {
@@ -41,23 +58,56 @@
   background: var(--panel-2);
 }
 
+.navLink:global(.active) {
+  color: var(--accent-2);
+  background: var(--accent-soft);
+}
+
 .newLink {
-  background: var(--accent);
+  background: var(--gradient);
   color: #fff;
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 
 .newLink:hover {
-  background: var(--accent-2);
   color: #fff;
+  filter: brightness(1.08);
+}
+
+.themeBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+
+.themeBtn:hover {
+  background: var(--panel-2);
+  color: var(--text);
 }
 
 .main {
   flex: 1;
   width: 100%;
-  max-width: 900px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 24px 24px 60px;
+}
+
+@media (max-width: 560px) {
+  .header {
+    padding: 0 14px;
+    flex-wrap: wrap;
+    height: auto;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
 }

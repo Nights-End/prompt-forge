@@ -15,6 +15,12 @@ apps/api/data/uploads/
 # Local provider config (contains API keys; never commit)
 apps/api/data/provider.json
 
+# Local search provider config (contains API keys; never commit)
+apps/api/data/search.json
+
+# Local workshop runtime config (default extra prompt, custom presets)
+apps/api/data/workshop.json
+
 # Logs
 *.log
 npm-debug.log*
@@ -28,3 +34,8 @@ npm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+.kilo/
+.kilocode/
+
+.temp/

@@ -46,6 +46,16 @@ async function chat(providerId: string, messages?: unknown) {
   return { status: res.status, data: text ? JSON.parse(text) : null };
 }
 
+async function title(content?: unknown) {
+  const res = await fetch(`${base}/api/llm/title`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  const text = await res.text();
+  return { status: res.status, data: text ? JSON.parse(text) : null };
+}
+
 test('ollama provider posts without auth header', async () => {
   saveProviderConfig({
     local: { kind: 'ollama', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1' },
@@ -156,4 +166,84 @@ test('invalid providerId and messages are rejected', async () => {
 
   const badMessages = await chat('local', 'not-an-array');
   expect(badMessages.status).toBe(400);
+});
+
+test('title generation prefers cloud provider when configured', async () => {
+  saveProviderConfig({
+    local: { kind: 'ollama', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1' },
+    cloud: {
+      kind: 'openai-compatible',
+      baseUrl: 'https://api.example.com/v1',
+      model: 'gpt-4o-mini',
+      apiKey: 'sk-secret',
+    },
+  });
+  mockFetch.mockResolvedValue(
+    new Response(
+      JSON.stringify({ choices: [{ message: { content: '"邮件写作助手"' } }], model: 'gpt-4o-mini' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+
+  const { status, data } = await title('请帮我写一封产品发布邮件');
+  expect(status).toBe(200);
+  expect(data.title).toBe('邮件写作助手');
+  expect(data.model).toBe('gpt-4o-mini');
+
+  const [url, init] = mockFetch.mock.calls[0];
+  expect(url).toBe('https://api.example.com/v1/chat/completions');
+  expect(init.headers.Authorization).toBe('Bearer sk-secret');
+  const sent = JSON.parse(init.body);
+  expect(sent.messages[0].role).toBe('system');
+  expect(sent.messages[1].content).toBe('请帮我写一封产品发布邮件');
+});
+
+test('title generation falls back to local provider when cloud missing', async () => {
+  saveProviderConfig({
+    local: { kind: 'ollama', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1' },
+    cloud: { kind: 'openai-compatible', baseUrl: '', model: '' },
+  });
+  mockFetch.mockResolvedValue(
+    new Response(
+      JSON.stringify({ choices: [{ message: { content: '产品发布邮件' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+
+  const { status, data } = await title('请帮我写一封产品发布邮件');
+  expect(status).toBe(200);
+  expect(data.title).toBe('产品发布邮件');
+  expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:11434/v1/chat/completions');
+});
+
+test('title generation truncates and strips quotes', async () => {
+  saveProviderConfig({
+    local: { kind: 'ollama', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1' },
+    cloud: { kind: 'openai-compatible', baseUrl: '', model: '' },
+  });
+  mockFetch.mockResolvedValue(
+    new Response(
+      JSON.stringify({ choices: [{ message: { content: '「' + '很'.repeat(80) + '」' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+
+  const { status, data } = await title('x');
+  expect(status).toBe(200);
+  expect(data.title).toHaveLength(50);
+  expect(data.title.startsWith('「')).toBe(false);
+  expect(data.title.endsWith('」')).toBe(false);
+});
+
+test('title generation rejects missing content and unconfigured providers', async () => {
+  const empty = await title('');
+  expect(empty.status).toBe(400);
+
+  saveProviderConfig({
+    local: { kind: 'ollama', baseUrl: '', model: '' },
+    cloud: { kind: 'openai-compatible', baseUrl: '', model: '' },
+  });
+  const unconfigured = await title('hello');
+  expect(unconfigured.status).toBe(400);
+  expect(mockFetch).not.toHaveBeenCalled();
 });

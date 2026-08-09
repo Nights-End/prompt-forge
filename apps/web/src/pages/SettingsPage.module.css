@@ -34,6 +34,12 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s ease;
+}
+
+.card:hover {
+  border-color: var(--border-strong);
 }
 
 .cardTitle {
@@ -53,6 +59,29 @@
   gap: 5px;
 }
 
+.modelRow {
+  display: flex;
+  gap: 8px;
+}
+
+.modelRow input {
+  flex: 1;
+  min-width: 0;
+}
+
+.fetchBtn {
+  white-space: nowrap;
+}
+
+.modelSelect {
+  width: 100%;
+}
+
+.modelError {
+  font-size: 12px;
+  color: var(--danger);
+}
+
 .field span {
   font-size: 13px;
   color: var(--muted);
@@ -63,7 +92,7 @@
 }
 
 .ok {
-  color: #6bd39a;
+  color: var(--success);
 }
 
 .muted {
@@ -76,6 +105,11 @@
   justify-content: flex-end;
   gap: 12px;
   margin-top: 18px;
+}
+
+.sectionTitle {
+  font-size: 20px;
+  margin: 28px 0 6px;
 }
 
 @media (max-width: 700px) {

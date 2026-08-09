@@ -9,8 +9,8 @@ import {
 import styles from './SettingsPage.module.css';
 
 const PROVIDER_META: { id: ProviderId; name: string; hint: string }[] = [
-  { id: 'local', name: 'Local (Ollama)', hint: 'For sensitive content. Runs on your machine.' },
-  { id: 'cloud', name: 'Cloud (OpenAI-compatible)', hint: 'For high-quality tasks. Key via env PF_LLM_API_KEY or below.' },
+  { id: 'local', name: '本地 (Ollama)', hint: '用于敏感内容，运行在你的机器上。' },
+  { id: 'cloud', name: '云端 (OpenAI 兼容)', hint: '用于高质量任务。密钥通过环境变量 PF_LLM_API_KEY 或下方填写。' },
 ];
 
 export default function SettingsPage() {
@@ -22,6 +22,20 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+
+  const [searchConfig, setSearchConfig] = useState<{
+    provider: string;
+    hasApiKey: boolean;
+    envApiKey: boolean;
+  } | null>(null);
+  const [searchProvider, setSearchProvider] = useState('none');
+  const [searchApiKey, setSearchApiKey] = useState('');
+  const [savingSearch, setSavingSearch] = useState(false);
+  const [savedSearch, setSavedSearch] = useState(false);
+
+  const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({});
+  const [loadingModels, setLoadingModels] = useState<Record<string, boolean>>({});
+  const [modelErrors, setModelErrors] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -39,8 +53,13 @@ export default function SettingsPage() {
         };
       }
       setDrafts(next);
+
+      const search = await api.getSearchSettings();
+      setSearchConfig(search);
+      setSearchProvider(search.provider);
+      setSearchApiKey('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load settings');
+      setError(e instanceof Error ? e.message : '加载设置失败');
     } finally {
       setLoading(false);
     }
@@ -52,6 +71,34 @@ export default function SettingsPage() {
 
   function patch(id: ProviderId, key: keyof ProviderSettingsInput, value: string) {
     setDrafts((d) => ({ ...d, [id]: { ...d[id], [key]: value } }));
+  }
+
+  async function handleFetchModels(id: ProviderId) {
+    const d = drafts[id];
+    const baseUrl = d?.baseUrl?.trim() ?? '';
+    if (!d || !baseUrl) {
+      setModelErrors((m) => ({ ...m, [id]: '请先填写 Base URL' }));
+      return;
+    }
+    setLoadingModels((m) => ({ ...m, [id]: true }));
+    setModelErrors((m) => ({ ...m, [id]: '' }));
+    setModelOptions((m) => ({ ...m, [id]: [] }));
+    try {
+      const { models } = await api.fetchModels({
+        id,
+        kind: d.kind ?? 'openai-compatible',
+        baseUrl,
+        apiKey: d.apiKey || undefined,
+      });
+      setModelOptions((m) => ({ ...m, [id]: models }));
+    } catch (e) {
+      setModelErrors((m) => ({
+        ...m,
+        [id]: e instanceof Error ? e.message : '拉取模型失败',
+      }));
+    } finally {
+      setLoadingModels((m) => ({ ...m, [id]: false }));
+    }
   }
 
   async function handleSave() {
@@ -83,21 +130,40 @@ export default function SettingsPage() {
       });
       setSaved(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save settings');
+      setError(e instanceof Error ? e.message : '保存设置失败');
     } finally {
       setSaving(false);
     }
   }
 
-  if (loading) return <div className={styles.state}>Loading…</div>;
+  async function handleSaveSearch() {
+    setSavingSearch(true);
+    setSavedSearch(false);
+    setError('');
+    try {
+      const result = await api.saveSearchSettings({
+        provider: searchProvider,
+        apiKey: searchApiKey || undefined,
+      });
+      setSearchConfig(result);
+      setSearchProvider(result.provider);
+      setSearchApiKey('');
+      setSavedSearch(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存搜索设置失败');
+    } finally {
+      setSavingSearch(false);
+    }
+  }
+
+  if (loading) return <div className={styles.state}>加载中…</div>;
 
   return (
     <div className={styles.page}>
-      <h1 className={styles.title}>Settings</h1>
+      <h1 className={styles.title}>设置</h1>
       <p className={styles.sub}>
-        LLM providers. Sensitive content routes to the local provider, high-quality
-        tasks to the cloud provider. API keys are stored locally (chmod 600) or read
-        from the <code>PF_LLM_API_KEY</code> environment variable — never in SQLite.
+        LLM 提供方配置。敏感内容走本地提供方，高质量任务走云端提供方。API 密钥仅保存在本地（chmod
+        600）或从 <code>PF_LLM_API_KEY</code> 环境变量读取，绝不写入 SQLite。
       </p>
 
       {error && <div className={styles.error}>{error}</div>}
@@ -113,13 +179,13 @@ export default function SettingsPage() {
               <p className={styles.hint}>{meta.hint}</p>
 
               <label className={styles.field}>
-                <span>Type</span>
+                <span>类型</span>
                 <select
                   value={d.kind}
                   onChange={(e) => patch(meta.id, 'kind', e.target.value as ProviderKind)}
                 >
                   <option value="ollama">Ollama</option>
-                  <option value="openai-compatible">OpenAI compatible</option>
+                  <option value="openai-compatible">OpenAI 兼容</option>
                 </select>
               </label>
 
@@ -134,29 +200,58 @@ export default function SettingsPage() {
               </label>
 
               <label className={styles.field}>
-                <span>Model</span>
-                <input
-                  type="text"
-                  value={d.model}
-                  onChange={(e) => patch(meta.id, 'model', e.target.value)}
-                  placeholder={meta.id === 'local' ? 'llama3.1' : 'gpt-4o-mini'}
-                />
+                <span>模型</span>
+                <div className={styles.modelRow}>
+                  <input
+                    type="text"
+                    value={d.model}
+                    onChange={(e) => patch(meta.id, 'model', e.target.value)}
+                    placeholder={meta.id === 'local' ? 'llama3.1' : 'gpt-4o-mini'}
+                  />
+                  <button
+                    type="button"
+                    className={styles.fetchBtn}
+                    onClick={() => handleFetchModels(meta.id)}
+                    disabled={loadingModels[meta.id]}
+                  >
+                    {loadingModels[meta.id] ? '…' : '拉取模型'}
+                  </button>
+                </div>
+                {modelOptions[meta.id]?.length > 0 && (
+                  <select
+                    className={styles.modelSelect}
+                    value={d.model}
+                    onChange={(e) => patch(meta.id, 'model', e.target.value)}
+                  >
+                    <option value="" disabled>
+                      选择模型…
+                    </option>
+                    {modelOptions[meta.id].map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {modelErrors[meta.id] && (
+                  <span className={styles.modelError}>{modelErrors[meta.id]}</span>
+                )}
               </label>
 
               <label className={styles.field}>
-                <span>API key (optional)</span>
+                <span>API Key（可选）</span>
                 <input
                   type="password"
                   value={d.apiKey}
                   onChange={(e) => patch(meta.id, 'apiKey', e.target.value)}
-                  placeholder={cfg.hasApiKey || cfg.envApiKey ? 'Stored — leave blank to keep' : 'Leave blank if using PF_LLM_API_KEY'}
+                  placeholder={cfg.hasApiKey || cfg.envApiKey ? '已保存 — 留空则保持不变' : '使用 PF_LLM_API_KEY 时可留空'}
                 />
               </label>
 
               <div className={styles.keyStatus}>
-                {cfg.envApiKey && <span className={styles.ok}>PF_LLM_API_KEY env var active</span>}
-                {cfg.hasApiKey && !cfg.envApiKey && <span className={styles.ok}>Key stored locally</span>}
-                {!cfg.hasApiKey && !cfg.envApiKey && <span className={styles.muted}>No key configured</span>}
+                {cfg.envApiKey && <span className={styles.ok}>正在使用环境变量 PF_LLM_API_KEY</span>}
+                {cfg.hasApiKey && !cfg.envApiKey && <span className={styles.ok}>密钥已保存在本地</span>}
+                {!cfg.hasApiKey && !cfg.envApiKey && <span className={styles.muted}>未配置密钥</span>}
               </div>
             </div>
           );
@@ -164,11 +259,87 @@ export default function SettingsPage() {
       </div>
 
       <div className={styles.actions}>
-        {saved && <span className={styles.ok}>Saved ✓</span>}
+        {saved && <span className={styles.ok}>已保存 ✓</span>}
         <button onClick={handleSave} disabled={saving}>
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? '保存中…' : '保存'}
         </button>
       </div>
+
+      <h2 className={styles.sectionTitle}>联网搜索</h2>
+      <p className={styles.sub}>
+        为 AI 文生图提示词提供联网搜索。模型支持 function calling 时可搜索趋势、风格与参考。
+        需要 Tavily 或 Exa API Key，未配置时自动降级为 DuckDuckGo。
+      </p>
+
+      {searchConfig && (
+        <div className={styles.card}>
+          <label className={styles.field}>
+            <span>服务商</span>
+            <select
+              value={searchProvider}
+              onChange={(e) => setSearchProvider(e.target.value)}
+            >
+              <option value="none">关闭</option>
+              <option value="tavily">Tavily</option>
+              <option value="exa">Exa</option>
+              <option value="duckduckgo">DuckDuckGo</option>
+            </select>
+          </label>
+
+          {searchProvider === 'tavily' && (
+            <label className={styles.field}>
+              <span>Tavily API Key</span>
+              <input
+                type="password"
+                value={searchApiKey}
+                onChange={(e) => setSearchApiKey(e.target.value)}
+                placeholder={
+                  searchConfig.hasApiKey || searchConfig.envApiKey
+                    ? '已保存 — 留空则保持不变'
+                    : '填写 Tavily API Key'
+                }
+              />
+            </label>
+          )}
+
+          {searchProvider === 'exa' && (
+            <label className={styles.field}>
+              <span>Exa API Key</span>
+              <input
+                type="password"
+                value={searchApiKey}
+                onChange={(e) => setSearchApiKey(e.target.value)}
+                placeholder={
+                  searchConfig.hasApiKey || searchConfig.envApiKey
+                    ? '已保存 — 留空则保持不变'
+                    : '填写 Exa API Key'
+                }
+              />
+            </label>
+          )}
+
+          <div className={styles.keyStatus}>
+            {searchConfig.envApiKey && (
+              <span className={styles.ok}>正在使用环境变量 PF_SEARCH_API_KEY</span>
+            )}
+            {searchConfig.hasApiKey && !searchConfig.envApiKey && (
+              <span className={styles.ok}>密钥已保存在本地</span>
+            )}
+          </div>
+
+          <div className={styles.actions}>
+            {savedSearch && <span className={styles.ok}>已保存 ✓</span>}
+            <button onClick={handleSaveSearch} disabled={savingSearch}>
+              {savingSearch ? '保存中…' : '保存搜索设置'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <p className={styles.sub}>
+        注意：仅当会话开启「🔍 联网搜索」时才会生效。模型还需支持 function calling（OpenAI
+        兼容接口），部分本地模型可能忽略搜索工具。
+      </p>
     </div>
   );
 }

@@ -1,44 +1,139 @@
+/* ============================================================
+   Prompt Forge — AI-Native UI design tokens
+   Source: design-system/prompt-forge/MASTER.md (ui-ux-pro-max)
+   ============================================================ */
+
 :root {
-  --bg: #0f1115;
-  --panel: #171a21;
-  --panel-2: #1f232c;
-  --border: #2a2f3a;
-  --text: #e6e9ef;
-  --muted: #9aa3b2;
-  --accent: #5b8cff;
-  --accent-2: #7aa2ff;
-  --danger: #ff5c5c;
-  --radius: 10px;
+  /* Surfaces & text */
+  --bg: #0d0a14;
+  --panel: #151023;
+  --panel-2: #1e1731;
+  --border: #2c2345;
+  --border-strong: #3a2f5e;
+  --text: #ede9f7;
+  --muted: #a39bb8;
+
+  /* Brand */
+  --accent: #8b5cf6;
+  --accent-2: #a78bfa;
+  --accent-soft: rgba(139, 92, 246, 0.14);
+  --pink: #ec4899;
+  --pink-soft: rgba(236, 72, 153, 0.12);
+  --gradient: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+
+  /* Status */
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.12);
+  --success: #34d399;
+  --fav: #fbbf24;
+
+  /* Effects */
+  --ring: rgba(139, 92, 246, 0.45);
+  --overlay: rgba(13, 10, 20, 0.6);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+
+  /* Geometry & type */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --header-h: 58px;
+  --font-display: 'Space Grotesk', 'Segoe UI', system-ui, -apple-system,
+    sans-serif;
+  --font-body: 'DM Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas,
+    Menlo, monospace;
+
   color-scheme: dark;
+}
+
+html[data-theme='light'] {
+  --bg: #faf8ff;
+  --panel: #ffffff;
+  --panel-2: #f3eefd;
+  --border: #e6def7;
+  --border-strong: #d3c4ef;
+  --text: #211c33;
+  --muted: #6b647f;
+
+  --accent: #7c3aed;
+  --accent-2: #6d28d9;
+  --accent-soft: rgba(124, 58, 237, 0.1);
+  --pink: #db2777;
+  --pink-soft: rgba(219, 39, 119, 0.08);
+  --gradient: linear-gradient(135deg, #7c3aed 0%, #db2777 100%);
+
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.08);
+  --success: #059669;
+  --fav: #d97706;
+
+  --ring: rgba(124, 58, 237, 0.35);
+  --overlay: rgba(33, 28, 51, 0.45);
+  --shadow-sm: 0 1px 3px rgba(33, 28, 51, 0.08);
+  --shadow-md: 0 8px 24px rgba(33, 28, 51, 0.12);
+
+  color-scheme: light;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  scrollbar-color: var(--border-strong) transparent;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
-    Arial, sans-serif;
+  font-family: var(--font-body);
   background: var(--bg);
   color: var(--text);
-  line-height: 1.5;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* ---------- Controls ---------- */
 
 button {
   cursor: pointer;
   font: inherit;
+  font-weight: 500;
   border: 1px solid var(--border);
   background: var(--panel-2);
   color: var(--text);
-  padding: 8px 14px;
-  border-radius: 8px;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    box-shadow 0.15s ease, transform 0.1s ease;
 }
 
 button:hover {
-  background: #262b37;
-  border-color: #3a4150;
+  background: color-mix(in srgb, var(--panel-2) 75%, var(--accent) 25%);
+  border-color: var(--border-strong);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
 }
 
 input,
@@ -48,9 +143,16 @@ textarea {
   color: var(--text);
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 9px 12px;
   width: 100%;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease,
+    background-color 0.2s ease;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--muted) 70%, transparent);
 }
 
 input:focus,
@@ -58,13 +160,60 @@ select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 a {
   color: var(--accent-2);
   text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+a:hover {
+  color: var(--accent);
+}
+
+pre,
+code {
+  font-family: var(--font-mono);
 }
 
 pre {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-family: var(--font-mono);
+}
+
+/* ---------- Accessibility ---------- */
+
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- Scrollbar ---------- */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: content-box;
 }
