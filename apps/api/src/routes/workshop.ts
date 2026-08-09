@@ -7,9 +7,13 @@ import {
   resolveUpstream,
   buildMessages,
   accumulateToolCalls,
+  describeImages,
+  resolveVisionUpstream,
+  VISION_DESCRIBE_MARKER,
   type DetectedToolCalls,
 } from '../llm/provider.js';
 import { executeSearch } from '../search/execute.js';
+import { cleanTitle, pickProviderId } from './llm.js';
 import {
   BUILTIN_PRESETS,
   EXTRA_SYSTEM_PROMPT_MAX,
@@ -36,6 +40,24 @@ const MAX_IMAGES = 5;
 const PRESET_NAME_MAX = 100;
 const PRESET_DESC_MAX = 500;
 const PRESET_INSTRUCTIONS_MAX = 20_000;
+const TITLE_CONTEXT_MESSAGES = 10;
+const MAX_TITLE_CONTEXT_CHARS = 4000;
+const TITLE_TIMEOUT_MS = CHAT_TIMEOUT_MS;
+const VISION_TIMEOUT_MS = 300_000;
+
+const TITLE_SYSTEM_PROMPT =
+  '你是一个标题生成助手。根据提供的内容（可能是一段对话或一个提示词），生成一个简洁、准确概括其主题的中文标题，最多 20 个字。' +
+  '只输出标题本身：不要引号、不要多余说明、不要句末标点、不要换行。';
+
+const REVERSE_ENHANCE_SYSTEM_PROMPT =
+  '你是文生图提示词专家。请基于用户提供的图片描述，将其转化为一段完整、连贯、可直接用于文生图模型的提示词。\n' +
+  '要求：\n' +
+  '1. 按「主体→背景→风格→光影」顺序组织内容，各部分用中文自然描述，不编号不打标签\n' +
+  '2. 补充图片描述中缺失但对生成效果重要的细节（材质纹理、光线方向、氛围感等）\n' +
+  '3. 输出为一段通顺的完整文本，不要加注释、引号或额外说明\n' +
+  '4. 保留原图的关键视觉元素，不添加与原图无关的内容';
+
+const REVERSE_USER_PROMPT = '请基于以下图片描述，生成文生图提示词：\n\n';
 
 export interface WorkshopDeps {
   fetchImpl?: typeof fetch;
@@ -88,6 +110,30 @@ function toMultimodalContent(images?: string[]): MessageContentPart[] | null {
     type: 'image_url' as const,
     image_url: { url },
   }));
+}
+
+function appendVisionDescription(content: string, description: string): string {
+  if (content.length >= MAX_CONTENT_CHARS) return content;
+  const budget = MAX_CONTENT_CHARS - content.length;
+  const desc =
+    description.length > budget ? description.slice(0, budget) : description;
+  return `${content}\n\n[${VISION_DESCRIBE_MARKER}]\n${desc}`;
+}
+
+function buildTitleContext(messages: ConversationMessage[]): string {
+  const lines: string[] = [];
+  let total = 0;
+  for (const m of messages) {
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    const text = m.content.replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    const line = `${m.role === 'user' ? '用户' : '助手'}：${text}`;
+    if (total + line.length > MAX_TITLE_CONTEXT_CHARS && lines.length > 0) break;
+    lines.push(line);
+    total += line.length;
+    if (total >= MAX_TITLE_CONTEXT_CHARS) break;
+  }
+  return lines.join('\n').slice(0, MAX_TITLE_CONTEXT_CHARS);
 }
 
 export function createWorkshopRouter(
@@ -371,6 +417,87 @@ export function createWorkshopRouter(
     res.json({ removed });
   });
 
+  router.post('/conversations/:id/title', async (req, res) => {
+    const conversation = repo.getById(req.params.id);
+    if (!conversation) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { currentPrompt?: unknown };
+    const currentPrompt =
+      typeof body.currentPrompt === 'string' ? body.currentPrompt.trim() : '';
+    const context = currentPrompt
+      ? currentPrompt.slice(0, MAX_TITLE_CONTEXT_CHARS)
+      : buildTitleContext(
+          repo.listRecentMessages(conversation.id, TITLE_CONTEXT_MESSAGES),
+        );
+    if (!context) {
+      res.status(400).json({ error: 'conversation has no content to summarize' });
+      return;
+    }
+
+    const providerId = pickProviderId();
+    if (!providerId) {
+      res.status(400).json({
+        error: 'no LLM provider configured (set baseUrl and api key in settings)',
+      });
+      return;
+    }
+    const upstream = resolveUpstream(providerId);
+    if (!upstream.ok) {
+      res.status(400).json({ error: upstream.error });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TITLE_TIMEOUT_MS);
+    try {
+      const result = await chatCompletions(
+        fetchImpl,
+        upstream.value,
+        {
+          messages: [
+            { role: 'system', content: TITLE_SYSTEM_PROMPT },
+            { role: 'user', content: context },
+          ],
+        },
+        controller.signal,
+      );
+      if (!result.ok) {
+        res.status(502).json({ error: result.error });
+        return;
+      }
+      const data = (await result.response.json()) as {
+        choices?: { message?: { content?: unknown } }[];
+        model?: string;
+      };
+      const raw = data.choices?.[0]?.message?.content;
+      if (typeof raw !== 'string') {
+        res.status(502).json({ error: 'upstream response missing choices[0].message.content' });
+        return;
+      }
+      const title = cleanTitle(raw);
+      if (!title) {
+        res.status(502).json({ error: 'upstream returned an empty title' });
+        return;
+      }
+      repo.update(conversation.id, { title });
+      res.json({ title, model: data.model ?? upstream.value.model });
+    } catch (e) {
+      const aborted = e instanceof Error && e.name === 'AbortError';
+      res.status(aborted ? 504 : 502).json({
+        error: aborted
+          ? 'upstream request timed out'
+          : e instanceof Error
+            ? e.message
+            : 'upstream request failed',
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
   router.post('/conversations/:id/chat', async (req, res) => {
     const conversation = repo.getById(req.params.id);
     if (!conversation) {
@@ -384,7 +511,7 @@ export function createWorkshopRouter(
       images?: unknown;
     };
 
-    const content = typeof body.content === 'string' ? body.content.trim() : '';
+    let content = typeof body.content === 'string' ? body.content.trim() : '';
     if (!content) {
       res.status(400).json({ error: 'content must be a non-empty string' });
       return;
@@ -433,10 +560,95 @@ export function createWorkshopRouter(
         ? `\n\nYou have access to a web search tool named "search_web". When the user asks for up-to-date information, current trends, or anything requiring real-time knowledge, call the search_web tool with a concise query. The search results will be provided to you in the next turn — use them to enrich your answer. Never say you cannot search the web: the tool is available and you should call it when needed.`
         : '');
 
-    let history: ConversationMessage[];
+    let bridgeImages: string[] | undefined = images ?? undefined;
+
+    const controller = new AbortController();
+    const visionController = new AbortController();
+    let done = false;
+    let timedOut = false;
+    let timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, CHAT_TIMEOUT_MS);
+    const visionTimer = setTimeout(() => {
+      visionController.abort();
+    }, VISION_TIMEOUT_MS);
+
+    const abortOnClose = () => {
+      controller.abort();
+      visionController.abort();
+    };
+    res.on('close', abortOnClose);
+
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const vision = resolveVisionUpstream();
+    let history: ConversationMessage[] | undefined;
+    if (vision.ok) {
+      clearTimeout(timer);
+      try {
+        history = repo.listRecentMessages(conversation.id, WORKSHOP_HISTORY_LIMIT);
+        const hasHistoryImages = history.some(
+          (m) =>
+            !!m.multimodalContent &&
+            m.multimodalContent.length > 0 &&
+            !m.content.includes(VISION_DESCRIBE_MARKER),
+        );
+        if (hasHistoryImages || (bridgeImages && bridgeImages.length > 0)) {
+          sendEvent(res, { type: 'vision', status: 'describing' });
+        }
+        for (const m of history) {
+          if (!m.multimodalContent || m.multimodalContent.length === 0) continue;
+          if (m.content.includes(VISION_DESCRIBE_MARKER)) {
+            m.multimodalContent = null;
+            continue;
+          }
+          const urls = m.multimodalContent
+            .filter((p) => p.type === 'image_url')
+            .map((p) => p.image_url.url);
+          if (urls.length === 0) continue;
+          const desc = await describeImages(
+            fetchImpl,
+            vision.value,
+            urls,
+            visionController.signal,
+          );
+          if (desc.ok) {
+            m.content = appendVisionDescription(m.content, desc.text);
+            m.multimodalContent = null;
+          }
+        }
+        if (bridgeImages && bridgeImages.length > 0) {
+          const desc = await describeImages(
+            fetchImpl,
+            vision.value,
+            bridgeImages,
+            visionController.signal,
+          );
+          if (desc.ok) {
+            content = appendVisionDescription(content, desc.text);
+            bridgeImages = undefined;
+          }
+        }
+      } catch {
+        // vision bridge failed or aborted -> fall back to original behavior
+      } finally {
+        clearTimeout(visionTimer);
+        timer = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, CHAT_TIMEOUT_MS);
+      }
+    }
+
     let appendedUser: ConversationMessage;
     try {
-      history = repo.listRecentMessages(conversation.id, WORKSHOP_HISTORY_LIMIT);
+      history = history ?? repo.listRecentMessages(conversation.id, WORKSHOP_HISTORY_LIMIT);
       const mc = toMultimodalContent(images);
       appendedUser = repo.appendMessage(
         conversation.id,
@@ -446,18 +658,13 @@ export function createWorkshopRouter(
       );
       repo.touch(conversation.id);
     } catch {
-      res.status(404).json({ error: 'conversation no longer exists' });
+      res.off('close', abortOnClose);
+      sendEvent(res, { type: 'error', message: 'conversation no longer exists' });
+      res.end();
       return;
     }
 
-    const controller = new AbortController();
-    let done = false;
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, CHAT_TIMEOUT_MS);
-
+    res.off('close', abortOnClose);
     const cleanupRolledBack: (() => void)[] = [];
 
     const onClose = () => {
@@ -472,15 +679,8 @@ export function createWorkshopRouter(
     res.on('close', onClose);
     if (res.destroyed) onClose();
 
-    res.status(200);
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders();
-
     try {
-      const chatMessages = buildMessages(history, content, images);
+      const chatMessages = buildMessages(history, content, bridgeImages);
 
       const fullMessages = [
         { role: 'system', content: systemMessage },
@@ -571,6 +771,250 @@ export function createWorkshopRouter(
       }
     } finally {
       clearTimeout(timer);
+      clearTimeout(visionTimer);
+      res.off('close', onClose);
+    }
+  });
+
+  router.post('/conversations/:id/reverse', async (req, res) => {
+    const conversation = repo.getById(req.params.id);
+    if (!conversation) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { images?: unknown };
+    const images = validateImages(body.images);
+    if (images === null) {
+      res.status(400).json({
+        error: `images must be an array of up to ${MAX_IMAGES} data:image/... strings`,
+      });
+      return;
+    }
+    if (images.length === 0) {
+      res.status(400).json({ error: 'images must be a non-empty array' });
+      return;
+    }
+
+    const vision = resolveVisionUpstream();
+    if (!vision.ok) {
+      res.status(400).json({
+        error: '识图模型未配置：请先在设置页配置识图模型后再使用反推功能',
+      });
+      return;
+    }
+
+    const upstream = resolveUpstream(conversation.providerId as ProviderId);
+    if (!upstream.ok) {
+      res.status(400).json({ error: upstream.error });
+      return;
+    }
+
+    const controller = new AbortController();
+    const visionController = new AbortController();
+    let done = false;
+    let timedOut = false;
+    let visionTimedOut = false;
+    let timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, CHAT_TIMEOUT_MS);
+    const visionTimer = setTimeout(() => {
+      visionTimedOut = true;
+      visionController.abort();
+    }, VISION_TIMEOUT_MS);
+
+    const abortOnClose = () => {
+      controller.abort();
+      visionController.abort();
+    };
+    res.on('close', abortOnClose);
+
+    clearTimeout(timer);
+    let description: string;
+    try {
+      const desc = await describeImages(
+        fetchImpl,
+        vision.value,
+        images,
+        visionController.signal,
+      );
+      if (!desc.ok) {
+        res.off('close', abortOnClose);
+        clearTimeout(visionTimer);
+        res.status(502).json({ error: desc.error });
+        return;
+      }
+      description = desc.text;
+    } catch (e) {
+      res.off('close', abortOnClose);
+      clearTimeout(visionTimer);
+      const aborted = e instanceof Error && e.name === 'AbortError';
+      res.status(aborted ? 504 : 502).json({
+        error: aborted
+          ? visionTimedOut
+            ? 'vision request timed out'
+            : 'vision request aborted'
+          : e instanceof Error
+            ? e.message
+            : 'vision request failed',
+      });
+      return;
+    }
+    clearTimeout(visionTimer);
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, CHAT_TIMEOUT_MS);
+
+    let appendedUser: ConversationMessage;
+    try {
+      appendedUser = repo.appendMessage(
+        conversation.id,
+        'user',
+        appendVisionDescription('反推提示词', description),
+        toMultimodalContent(images),
+      );
+      repo.touch(conversation.id);
+    } catch {
+      res.off('close', abortOnClose);
+      res.status(404).json({ error: 'conversation no longer exists' });
+      return;
+    }
+
+    res.off('close', abortOnClose);
+    const onClose = () => {
+      if (done) return;
+      done = true;
+      controller.abort();
+      repo.deleteMessage(appendedUser.id);
+    };
+    res.on('close', onClose);
+    if (res.destroyed) onClose();
+
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const enhanceMessages = [
+      { role: 'system', content: REVERSE_ENHANCE_SYSTEM_PROMPT },
+      { role: 'user', content: `${REVERSE_USER_PROMPT}${description}` },
+    ];
+
+    let fullText = '';
+    let model: string | undefined = upstream.value.model;
+    try {
+      const result = await chatCompletions(
+        fetchImpl,
+        upstream.value,
+        { messages: enhanceMessages, stream: true },
+        controller.signal,
+      );
+      if (!result.ok) {
+        if (!done) {
+          done = true;
+          repo.deleteMessage(appendedUser.id);
+        }
+        sendEvent(res, { type: 'error', message: result.error });
+        res.end();
+        return;
+      }
+
+      const up = result.response;
+      const contentType = up.headers.get('content-type') ?? '';
+      if (contentType.includes('text/event-stream') && up.body) {
+        try {
+          for await (const data of parseSseStream(up.body, MAX_PARSE_BUFFER_CHARS)) {
+            if (data === '[DONE]') break;
+            let parsed: UpstreamDelta | null = null;
+            try {
+              parsed = JSON.parse(data) as UpstreamDelta;
+            } catch {
+              continue;
+            }
+            if (!parsed) continue;
+            if (typeof parsed.model === 'string') model = parsed.model;
+            const textDelta =
+              typeof parsed.choices?.[0]?.delta?.content === 'string'
+                ? parsed.choices[0].delta.content
+                : '';
+            if (textDelta) {
+              if (fullText.length + textDelta.length > MAX_STREAM_TEXT_CHARS) {
+                throw new Error(
+                  `upstream response exceeds ${MAX_STREAM_TEXT_CHARS} characters`,
+                );
+              }
+              fullText += textDelta;
+              sendEvent(res, { type: 'chunk', text: textDelta });
+            }
+          }
+        } catch (e) {
+          throw e instanceof Error
+            ? e
+            : new Error('upstream stream error');
+        }
+      } else {
+        const fd = (await up.json()) as {
+          choices?: { message?: { content?: unknown } }[];
+          model?: string;
+        };
+        const ft = fd.choices?.[0]?.message?.content;
+        if (typeof ft === 'string' && ft) {
+          if (ft.length > MAX_STREAM_TEXT_CHARS) {
+            throw new Error(
+              `upstream response exceeds ${MAX_STREAM_TEXT_CHARS} characters`,
+            );
+          }
+          fullText = ft;
+          model = fd.model ?? model;
+          sendEvent(res, { type: 'chunk', text: ft });
+        }
+      }
+
+      if (!fullText) {
+        if (!done) {
+          done = true;
+          repo.deleteMessage(appendedUser.id);
+        }
+        sendEvent(res, { type: 'error', message: 'upstream returned an empty response' });
+        res.end();
+        return;
+      }
+
+      done = true;
+      try {
+        repo.appendMessage(conversation.id, 'assistant', fullText);
+      } catch {
+        sendEvent(res, { type: 'error', message: 'failed to persist assistant reply' });
+        res.end();
+        return;
+      }
+
+      sendEvent(res, { type: 'done', content: fullText, model });
+      res.end();
+    } catch (e) {
+      if (!done) {
+        done = true;
+        repo.deleteMessage(appendedUser.id);
+      }
+      if (!res.writableEnded && !res.destroyed) {
+        const message =
+          e instanceof Error && e.name === 'AbortError'
+            ? timedOut
+              ? 'upstream request timed out'
+              : 'request aborted'
+            : e instanceof Error
+              ? e.message
+              : 'upstream request failed';
+        sendEvent(res, { type: 'error', message });
+        res.end();
+      }
+    } finally {
+      clearTimeout(timer);
+      clearTimeout(visionTimer);
       res.off('close', onClose);
     }
   });

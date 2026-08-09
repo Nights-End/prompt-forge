@@ -155,6 +155,104 @@ textarea {
   border-color: transparent;
 }
 
+.paramSection {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.paramToggle {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.paramToggle:hover {
+  color: var(--text);
+}
+
+.paramBody {
+  margin-top: 10px;
+}
+
+.paramGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+
+.paramField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.paramField span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.paramField textarea {
+  resize: vertical;
+  min-height: 48px;
+  font-size: 13px;
+}
+
+.paramCustoms {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.paramCustomRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.paramCustomKey {
+  flex: 0 0 120px;
+  font-size: 12px;
+}
+
+.paramCustomVal {
+  flex: 1;
+  font-size: 12px;
+}
+
+.paramRemove {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.paramRemove:hover {
+  color: var(--danger);
+}
+
+.paramAdd {
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed var(--border-strong);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.paramAdd:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 @media (max-width: 560px) {
   .row {
     grid-template-columns: 1fr;

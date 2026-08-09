@@ -16,6 +16,7 @@ function promptToForm(p: Prompt): FormState {
     tags: p.tags.join(', '),
     isFavorite: p.isFavorite,
     type: p.type,
+    parameters: p.parameters ?? {},
     files: [],
   };
 }
@@ -57,21 +58,14 @@ export default function DetailPage() {
 
   const [values, setValues] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
-  const [isDefault, setIsDefault] = useState(false);
-  const [settingDefault, setSettingDefault] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [p, list, def] = await Promise.all([
-        api.getPrompt(id),
-        api.listAssets(id),
-        api.getDefaultPrompt().catch(() => null),
-      ]);
+      const [p, list] = await Promise.all([api.getPrompt(id), api.listAssets(id)]);
       setPrompt(p);
       setAssets(list);
-      setIsDefault(def?.id === p.id);
       const v: Record<string, string> = {};
       p.variables.forEach((name) => (v[name] = ''));
       setValues(v);
@@ -115,16 +109,6 @@ export default function DetailPage() {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  async function handleSetDefault() {
-    setSettingDefault(true);
-    try {
-      await api.setDefaultPrompt(id);
-      setIsDefault(true);
-    } finally {
-      setSettingDefault(false);
-    }
-  }
-
   if (loading) return <div className={styles.state}>加载中…</div>;
   if (error || !prompt)
     return (
@@ -165,15 +149,6 @@ export default function DetailPage() {
               AI 优化
             </span>
           </button>
-          {isDefault ? (
-            <button disabled title="打开工作台时自动加载此提示词">
-              ⭐ 当前默认
-            </button>
-          ) : (
-            <button onClick={handleSetDefault} disabled={settingDefault}>
-              {settingDefault ? '设置中…' : '设为默认'}
-            </button>
-          )}
           <button onClick={() => setEditing(true)}>编辑</button>
           <button className={styles.danger} onClick={handleDelete}>
             删除
@@ -199,6 +174,32 @@ export default function DetailPage() {
             <AssetThumb key={a.id} asset={a} onDelete={() => handleDeleteAsset(a.id)} />
           ))}
         </div>
+      )}
+
+      {prompt.parameters && Object.keys(prompt.parameters).length > 0 && (
+        <section className={styles.paramSection}>
+          <div className={styles.paramHead}>
+            <h2 className={styles.sectionTitle}>生成参数</h2>
+            <button
+              onClick={async () => {
+                const lines = Object.entries(prompt.parameters)
+                  .filter(([, v]) => v)
+                  .map(([k, v]) => `${k}: ${v}`);
+                if (lines.length > 0) await navigator.clipboard.writeText(lines.join('\n'));
+              }}
+            >
+              复制全部
+            </button>
+          </div>
+          <div className={styles.paramGrid}>
+            {Object.entries(prompt.parameters).map(([key, value]) => (
+              <div key={key} className={styles.paramItem}>
+                <span className={styles.paramKey}>{key}</span>
+                <span className={styles.paramValue}>{value || '—'}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       <pre className={styles.raw}>{prompt.content}</pre>

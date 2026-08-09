@@ -2,10 +2,13 @@ import { Router } from 'express';
 import {
   loadProviderConfig,
   saveProviderConfig,
+  loadVisionConfig,
+  saveVisionConfig,
   PROVIDER_IDS,
   PROVIDER_KINDS,
   normalizeBaseUrl,
   resolveApiKey,
+  resolveVisionApiKey,
   type ProviderId,
   type ProviderKind,
   type ProviderSettings,
@@ -18,7 +21,7 @@ import {
   type SearchProvider,
 } from '../search/config.js';
 
-function publicShape(id: ProviderId, settings: ProviderSettings) {
+function publicShape(id: string, settings: ProviderSettings) {
   return {
     id,
     kind: settings.kind,
@@ -26,6 +29,16 @@ function publicShape(id: ProviderId, settings: ProviderSettings) {
     model: settings.model,
     hasApiKey: Boolean(settings.apiKey),
     envApiKey: Boolean(process.env.PF_LLM_API_KEY),
+  };
+}
+
+function visionPublicShape(settings: ProviderSettings) {
+  return {
+    kind: settings.kind,
+    baseUrl: settings.baseUrl,
+    model: settings.model,
+    hasApiKey: Boolean(settings.apiKey),
+    envApiKey: Boolean(process.env.PF_VISION_API_KEY),
   };
 }
 
@@ -126,9 +139,9 @@ export function createSettingsRouter(deps: SettingsDeps = {}): Router {
       apiKey?: unknown;
     };
 
-    const id = body.id as ProviderId | undefined;
-    if (id !== undefined && !(PROVIDER_IDS as string[]).includes(id)) {
-      res.status(400).json({ error: `id must be one of: ${PROVIDER_IDS.join(', ')}` });
+    const id = typeof body.id === 'string' ? body.id : undefined;
+    if (id !== undefined && ![...PROVIDER_IDS, 'vision'].includes(id)) {
+      res.status(400).json({ error: `id must be one of: ${[...PROVIDER_IDS, 'vision'].join(', ')}` });
       return;
     }
     const kind = body.kind as ProviderKind | undefined;
@@ -142,8 +155,12 @@ export function createSettingsRouter(deps: SettingsDeps = {}): Router {
       return;
     }
     let apiKey = typeof body.apiKey === 'string' ? body.apiKey : undefined;
-    if (!apiKey && id !== undefined) {
-      apiKey = resolveApiKey(loadProviderConfig()[id]);
+    if (!apiKey) {
+      if (id === 'vision') {
+        apiKey = resolveVisionApiKey(loadVisionConfig());
+      } else if (id !== undefined && (PROVIDER_IDS as string[]).includes(id)) {
+        apiKey = resolveApiKey(loadProviderConfig()[id as ProviderId]);
+      }
     }
 
     const url = `${normalizeBaseUrl(kind ?? 'openai-compatible', baseUrl)}/models`;
@@ -182,6 +199,45 @@ export function createSettingsRouter(deps: SettingsDeps = {}): Router {
       return;
     }
     res.json({ models });
+  });
+
+  router.get('/vision', (_req, res) => {
+    res.json(visionPublicShape(loadVisionConfig()));
+  });
+
+  router.put('/vision', (req, res) => {
+    const body = (req.body ?? {}) as {
+      kind?: unknown;
+      baseUrl?: unknown;
+      model?: unknown;
+      apiKey?: unknown;
+    };
+
+    const config = loadVisionConfig();
+
+    const kind = body.kind as ProviderKind | undefined;
+    if (kind !== undefined && !(PROVIDER_KINDS as string[]).includes(kind)) {
+      res.status(400).json({ error: `kind must be one of: ${PROVIDER_KINDS.join(', ')}` });
+      return;
+    }
+    const baseUrl = typeof body.baseUrl === 'string' ? body.baseUrl.trim() : undefined;
+    const model = typeof body.model === 'string' ? body.model.trim() : undefined;
+    if (baseUrl === '') {
+      res.status(400).json({ error: 'baseUrl is required' });
+      return;
+    }
+
+    if (kind !== undefined) config.kind = kind;
+    if (baseUrl !== undefined) config.baseUrl = baseUrl;
+    if (model !== undefined) config.model = model;
+    if (typeof body.apiKey === 'string' && body.apiKey) {
+      config.apiKey = body.apiKey;
+    } else if (body.apiKey === null) {
+      config.apiKey = undefined;
+    }
+
+    saveVisionConfig(config);
+    res.json(visionPublicShape(config));
   });
 
   router.get('/search', (_req, res) => {

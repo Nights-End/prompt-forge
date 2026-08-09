@@ -12,7 +12,7 @@ import { createDb } from './db/index.js';
 import { ConversationRepository } from './db/conversations.js';
 import { PromptRepository } from './db/prompts.js';
 import { createWorkshopRouter } from './routes/workshop.js';
-import { saveProviderConfig } from './llm/config.js';
+import { saveProviderConfig, saveVisionConfig } from './llm/config.js';
 import { saveSearchConfig } from './search/config.js';
 import { loadWorkshopConfig } from './workshop/config.js';
 
@@ -95,6 +95,13 @@ async function chat(conversationId: string, body?: unknown) {
   return readSse(`${base}/api/workshop/conversations/${conversationId}/chat`, body ?? { content: 'a cat' });
 }
 
+async function reverse(conversationId: string, body?: unknown) {
+  return readSse(
+    `${base}/api/workshop/conversations/${conversationId}/reverse`,
+    body ?? { images: ['data:image/jpeg;base64,/9j/4AAQ=='] },
+  );
+}
+
 function sseUpstream(chunks: string[], model = 'llama3.1'): Response {
   const encoder = new TextEncoder();
   const parts = chunks.map(
@@ -117,6 +124,31 @@ function configureLocal() {
   saveProviderConfig({
     local: { kind: 'ollama', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1' },
     cloud: { kind: 'openai-compatible', baseUrl: '', model: '' },
+  });
+}
+
+function configureVision() {
+  saveVisionConfig({
+    kind: 'ollama',
+    baseUrl: 'http://localhost:9999/v1',
+    model: 'llava',
+  });
+}
+
+function mockVisionAndMain(
+  visionContent = '参考图 1：一只橘猫坐在窗台上',
+  mainChunks: string[] = ['ok'],
+) {
+  mockFetch.mockImplementation((url: string) => {
+    if (url.includes('9999')) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: visionContent } }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    }
+    return Promise.resolve(sseUpstream(mainChunks));
   });
 }
 
@@ -603,6 +635,333 @@ test('multimodal message validates images array', async () => {
   expect(tooMany.data.error).toContain('images');
 });
 
+test('vision bridge converts images to text description for main model', async () => {
+  configureLocal();
+  configureVision();
+  mockVisionAndMain();
+  const { data: conv } = await createConversation({ providerId: 'local' });
+
+  const fakeImage = 'data:image/jpeg;base64,/9j/4AAQ==';
+  await chat(conv.id, { content: 'describe this', images: [fakeImage] });
+
+  expect(mockFetch.mock.calls.length).toBe(2);
+  const [visionUrl, visionInit] = mockFetch.mock.calls[0];
+  expect(String(visionUrl)).toContain('9999');
+  const visionBody = JSON.parse(String(visionInit.body)) as {
+    messages: { role: string; content: unknown }[];
+  };
+  expect(Array.isArray(visionBody.messages.at(-1)?.content)).toBe(true);
+
+  const [, mainInit] = mockFetch.mock.calls[1];
+  const sent = JSON.parse(String(mainInit.body)) as {
+    messages: { role: string; content: unknown }[];
+  };
+  const lastMsg = sent.messages.at(-1)!;
+  expect(typeof lastMsg.content).toBe('string');
+  expect(lastMsg.content as string).toContain('[参考图描述]');
+  expect(lastMsg.content as string).toContain('一只橘猫坐在窗台上');
+  const hasImagePart = sent.messages.some(
+    (m) =>
+      Array.isArray(m.content) &&
+      (m.content as { type: string }[]).some((p) => p.type === 'image_url'),
+  );
+  expect(hasImagePart).toBe(false);
+
+  const messages = repo.listMessages(conv.id);
+  const userMsg = messages.find((m: ConversationMessage) => m.role === 'user') as ConversationMessage;
+  expect(userMsg.content).toContain('[参考图描述]');
+  expect(userMsg.multimodalContent).not.toBeNull();
+});
+
+test('chat emits a vision status event while describing images', async () => {
+  configureLocal();
+  configureVision();
+  mockVisionAndMain();
+  const { data: conv } = await createConversation({ providerId: 'local' });
+
+  const events = await chat(conv.id, {
+    content: 'describe this',
+    images: ['data:image/jpeg;base64,/9j/4AAQ=='],
+  });
+
+  const visionEvents = events.filter((e) => e.type === 'vision');
+  expect(visionEvents.length).toBeGreaterThan(0);
+  expect(visionEvents[0].status).toBe('describing');
+  expect(events.at(-1)?.type).toBe('done');
+});
+
+test('chat skips the vision status event when history images already carry the marker', async () => {
+  configureLocal();
+  configureVision();
+  mockVisionAndMain('参考图 1：一只橘猫坐在窗台上', ['增强后的提示词']);
+  const { data: conv } = await createConversation({ providerId: 'local' });
+  const fakeImage = 'data:image/jpeg;base64,/9j/4AAQ==';
+
+  await reverse(conv.id, { images: [fakeImage] });
+  expect(mockFetch.mock.calls.length).toBe(2);
+
+  mockVisionAndMain();
+  const events = await chat(conv.id, { content: 'follow up' });
+
+  expect(events.filter((e) => e.type === 'vision')).toHaveLength(0);
+  expect(mockFetch.mock.calls.length).toBe(3);
+  const [, mainInit] = mockFetch.mock.calls[2];
+  const sent = JSON.parse(String(mainInit.body)) as {
+    messages: { role: string; content: unknown }[];
+  };
+  expect(
+    sent.messages.some(
+      (m) =>
+        Array.isArray(m.content) &&
+        (m.content as { type: string }[]).some((p) => p.type === 'image_url'),
+    ),
+  ).toBe(false);
+});
+
+test('vision bridge describes history images without marker', async () => {
+  configureLocal();
+  mockFetch.mockResolvedValue(sseUpstream(['ok']));
+  const { data: conv } = await createConversation({ providerId: 'local' });
+
+  const fakeImage = 'data:image/jpeg;base64,/9j/4AAQ==';
+  await chat(conv.id, { content: 'first question', images: [fakeImage] });
+  expect(mockFetch.mock.calls.length).toBe(1);
+
+  configureVision();
+  mockVisionAndMain();
+  await chat(conv.id, { content: 'follow up' });
+
+  expect(mockFetch.mock.calls.length).toBe(3);
+  const [, mainInit] = mockFetch.mock.calls[2];
+  const sent = JSON.parse(String(mainInit.body)) as {
+    messages: { role: string; content: unknown }[];
+  };
+  const historyUser = sent.messages.find(
+    (m) => m.role === 'user' && typeof m.content === 'string' && (m.content as string).includes('first question'),
+  );
+  expect(historyUser).toBeDefined();
+  expect(historyUser!.content as string).toContain('[参考图描述]');
+  const hasImagePart = sent.messages.some(
+    (m) =>
+      Array.isArray(m.content) &&
+      (m.content as { type: string }[]).some((p) => p.type === 'image_url'),
+  );
+  expect(hasImagePart).toBe(false);
+});
+
+test('vision bridge skips history messages already containing marker', async () => {
+  configureLocal();
+  configureVision();
+  mockVisionAndMain();
+  const { data: conv } = await createConversation({ providerId: 'local' });
+
+  const fakeImage = 'data:image/jpeg;base64,/9j/4AAQ==';
+  await chat(conv.id, { content: 'first question', images: [fakeImage] });
+  expect(mockFetch.mock.calls.length).toBe(2);
+
+  mockVisionAndMain();
+  await chat(conv.id, { content: 'follow up' });
+
+  expect(mockFetch.mock.calls.length).toBe(3);
+  const [, mainInit] = mockFetch.mock.calls[2];
+  const sent = JSON.parse(String(mainInit.body)) as {
+    messages: { role: string; content: unknown }[];
+  };
+  const historyUser = sent.messages.find(
+    (m) => m.role === 'user' && typeof m.content === 'string' && (m.content as string).includes('first question'),
+  );
+  expect(historyUser).toBeDefined();
+  expect(historyUser!.content as string).toContain('[参考图描述]');
+});
+
+test('vision bridge falls back to sending images when vision fails', async () => {
+  configureLocal();
+  configureVision();
+  mockFetch.mockImplementation((url: string) => {
+    if (url.includes('9999')) {
+      return Promise.resolve(new Response('vision down', { status: 500 }));
+    }
+    return Promise.resolve(sseUpstream(['ok']));
+  });
+  const { data: conv } = await createConversation({ providerId: 'local' });
+
+  const fakeImage = 'data:image/jpeg;base64,/9j/4AAQ==';
+  await chat(conv.id, { content: 'describe this', images: [fakeImage] });
+
+  expect(mockFetch.mock.calls.length).toBe(2);
+  const [, mainInit] = mockFetch.mock.calls[1];
+  const sent = JSON.parse(String(mainInit.body)) as {
+    messages: { role: string; content: unknown }[];
+  };
+  const lastMsg = sent.messages.at(-1)!;
+  expect(Array.isArray(lastMsg.content)).toBe(true);
+  const parts = lastMsg.content as { type: string; image_url?: { url: string } }[];
+  const imagePart = parts.find((p) => p.type === 'image_url');
+  expect(imagePart?.image_url?.url).toBe(fakeImage);
+});
+
+test('vision bridge abort during describe does not leave orphan messages', async () => {
+  configureLocal();
+  configureVision();
+  mockFetch.mockImplementation(
+    (url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('aborted', 'AbortError')),
+          { once: true },
+        );
+      }),
+  );
+  const { data: conv } = await createConversation({ providerId: 'local' });
+
+  const ctrl = new AbortController();
+  const p = fetch(`${base}/api/workshop/conversations/${conv.id}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      content: 'x',
+      images: ['data:image/jpeg;base64,/9j/4AAQ=='],
+    }),
+    signal: ctrl.signal,
+  }).catch(() => null);
+
+  await waitFor(() => mockFetch.mock.calls.length > 0);
+  ctrl.abort();
+  await p;
+  await waitFor(() => repo.listMessages(conv.id).length === 0);
+  expect(repo.listMessages(conv.id)).toHaveLength(0);
+});
+
+test('reverse: vision describe then main model enhance streams result', async () => {
+  configureLocal();
+  configureVision();
+  mockVisionAndMain('参考图 1：一只橘猫坐在窗台上', ['增强后的提示词']);
+  const { data: conv } = await createConversation({ providerId: 'local' });
+
+  const events = await reverse(conv.id);
+
+  expect(events.at(-1)?.type).toBe('done');
+  expect(events.at(-1)?.content).toContain('增强后的提示词');
+  expect(mockFetch.mock.calls.length).toBe(2);
+
+  const [visionUrl] = mockFetch.mock.calls[0];
+  expect(String(visionUrl)).toContain('9999');
+
+  const [, mainInit] = mockFetch.mock.calls[1];
+  expect(String(mockFetch.mock.calls[1][0])).toContain('11434');
+  const sent = JSON.parse(String(mainInit.body)) as {
+    messages: { role: string; content: unknown }[];
+  };
+  expect(sent.messages[0].role).toBe('system');
+  expect(sent.messages[0].content as string).toContain('主体');
+  expect(sent.messages[0].content as string).toContain('光影');
+  const userMsg = sent.messages.at(-1)!;
+  expect(userMsg.content as string).toContain('一只橘猫坐在窗台上');
+
+  const messages = repo.listMessages(conv.id);
+  expect(messages).toHaveLength(2);
+  expect(messages[0].role).toBe('user');
+  expect(messages[0].content).toContain('反推提示词');
+  expect(messages[0].content).toContain('[参考图描述]');
+  expect(messages[0].content).toContain('一只橘猫坐在窗台上');
+  expect(messages[0].multimodalContent).not.toBeNull();
+  expect(messages[1].role).toBe('assistant');
+  expect(messages[1].content).toContain('增强后的提示词');
+});
+
+test('reverse persists the vision description so later chats skip re-describing', async () => {
+  configureLocal();
+  configureVision();
+  mockVisionAndMain('参考图 1：一只橘猫坐在窗台上', ['增强后的提示词']);
+  const { data: conv } = await createConversation({ providerId: 'local' });
+
+  await reverse(conv.id);
+  expect(mockFetch.mock.calls.length).toBe(2);
+
+  mockVisionAndMain();
+  const events = await chat(conv.id, { content: 'make it shorter' });
+
+  expect(events.at(-1)?.type).toBe('done');
+  expect(mockFetch.mock.calls.length).toBe(3);
+  const [, mainInit] = mockFetch.mock.calls[2];
+  const sent = JSON.parse(String(mainInit.body)) as {
+    messages: { role: string; content: unknown }[];
+  };
+  const reverseMsg = sent.messages.find(
+    (m) => m.role === 'user' && typeof m.content === 'string' && (m.content as string).includes('反推提示词'),
+  );
+  expect(reverseMsg).toBeDefined();
+  expect(reverseMsg!.content as string).toContain('一只橘猫坐在窗台上');
+  const hasImagePart = sent.messages.some(
+    (m) =>
+      Array.isArray(m.content) &&
+      (m.content as { type: string }[]).some((p) => p.type === 'image_url'),
+  );
+  expect(hasImagePart).toBe(false);
+});
+
+test('reverse: rejects when vision model not configured', async () => {
+  configureLocal();
+  const { data: conv } = await createConversation({ providerId: 'local' });
+
+  const res = await fetch(`${base}/api/workshop/conversations/${conv.id}/reverse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ images: ['data:image/jpeg;base64,/9j/4AAQ=='] }),
+  });
+  const data = (await res.json()) as { error?: string };
+  expect(res.status).toBe(400);
+  expect(data.error).toContain('识图模型');
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+
+test('reverse: rejects invalid or empty images', async () => {
+  configureLocal();
+  configureVision();
+  const { data: conv } = await createConversation({ providerId: 'local' });
+
+  const bad = await request(
+    'POST',
+    `${base}/api/workshop/conversations/${conv.id}/reverse`,
+    { images: ['not-an-image'] },
+  );
+  expect(bad.status).toBe(400);
+
+  const empty = await request(
+    'POST',
+    `${base}/api/workshop/conversations/${conv.id}/reverse`,
+    { images: [] },
+  );
+  expect(empty.status).toBe(400);
+  expect(empty.data.error).toContain('non-empty');
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+
+test('reverse: rolls back user message when main model fails', async () => {
+  configureLocal();
+  configureVision();
+  mockFetch.mockImplementation((url: string) => {
+    if (url.includes('9999')) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: '描述' } }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    }
+    return Promise.resolve(new Response('boom', { status: 500 }));
+  });
+  const { data: conv } = await createConversation({ providerId: 'local' });
+
+  const events = await reverse(conv.id);
+
+  expect(events.at(-1)?.type).toBe('error');
+  expect(mockFetch.mock.calls.length).toBe(2);
+  expect(repo.listMessages(conv.id)).toHaveLength(0);
+});
+
 test('enableSearch toggle is persisted via PUT', async () => {
   const { data: conv } = await createConversation();
   expect(conv.enableSearch).toBe(false);
@@ -985,6 +1344,125 @@ test('undo returns removed=0 when there is no user message', async () => {
     `${base}/api/workshop/conversations/nope/undo`,
   );
   expect(missing.status).toBe(404);
+});
+
+test('title generation summarizes conversation messages and persists the title', async () => {
+  configureLocal();
+  const { data: conv } = await createConversation({ providerId: 'local' });
+  repo.appendMessage(conv.id, 'user', '给我一个赛博朋克猫娘的提示词');
+  repo.appendMessage(conv.id, 'assistant', 'masterpiece, cyberpunk catgirl');
+  repo.appendMessage(conv.id, 'tool', 'query: trends\n\nsearch results should be skipped');
+
+  mockFetch.mockResolvedValue(
+    new Response(
+      JSON.stringify({ choices: [{ message: { content: '赛博猫娘提示词' } }], model: 'llama3.1' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+
+  const res = await request('POST', `${base}/api/workshop/conversations/${conv.id}/title`);
+  expect(res.status).toBe(200);
+  expect(res.data.title).toBe('赛博猫娘提示词');
+  expect(res.data.model).toBe('llama3.1');
+
+  const sent = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+  expect(sent.messages[0].role).toBe('system');
+  expect(sent.messages[1].content).toContain('赛博朋克猫娘');
+  expect(sent.messages[1].content).toContain('cyberpunk catgirl');
+  expect(sent.messages[1].content).not.toContain('search results should be skipped');
+
+  const got = await request('GET', `${base}/api/workshop/conversations/${conv.id}`);
+  expect(got.data.title).toBe('赛博猫娘提示词');
+});
+
+test('title generation trims quotes and newlines from the upstream reply', async () => {
+  configureLocal();
+  const { data: conv } = await createConversation({ providerId: 'local' });
+  repo.appendMessage(conv.id, 'user', '如何生成日落海景');
+  mockFetch.mockResolvedValue(
+    new Response(
+      JSON.stringify({ choices: [{ message: { content: '「日落海景提示词」\n\n补充说明' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+
+  const res = await request('POST', `${base}/api/workshop/conversations/${conv.id}/title`);
+  expect(res.status).toBe(200);
+  expect(res.data.title).toBe('日落海景提示词');
+});
+
+test('title generation prefers currentPrompt over conversation messages', async () => {
+  configureLocal();
+  const { data: conv } = await createConversation({ providerId: 'local' });
+  repo.appendMessage(conv.id, 'user', '帮我写一个机甲战士的提示词');
+
+  mockFetch.mockResolvedValue(
+    new Response(
+      JSON.stringify({ choices: [{ message: { content: '机甲战士提示词' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+
+  const res = await request(
+    'POST',
+    `${base}/api/workshop/conversations/${conv.id}/title`,
+    { currentPrompt: 'masterpiece, mecha warrior, cinematic lighting' },
+  );
+  expect(res.status).toBe(200);
+
+  const sent = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+  expect(sent.messages[1].content).toContain('mecha warrior');
+  expect(sent.messages[1].content).not.toContain('机甲战士');
+
+  const got = await request('GET', `${base}/api/workshop/conversations/${conv.id}`);
+  expect(got.data.title).toBe('机甲战士提示词');
+});
+
+test('title generation returns 400 without messages or missing conversation', async () => {
+  configureLocal();
+  const { data: conv } = await createConversation({ providerId: 'local' });
+  const empty = await request('POST', `${base}/api/workshop/conversations/${conv.id}/title`);
+  expect(empty.status).toBe(400);
+
+  const missing = await request('POST', `${base}/api/workshop/conversations/nope/title`);
+  expect(missing.status).toBe(404);
+});
+
+test('title generation prefers the cloud provider when configured', async () => {
+  saveProviderConfig({
+    local: { kind: 'ollama', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1' },
+    cloud: {
+      kind: 'openai-compatible',
+      baseUrl: 'http://cloud.example.com/v1',
+      model: 'gpt-4o',
+    },
+  });
+  process.env.PF_LLM_API_KEY = 'sk-test';
+  const { data: conv } = await createConversation({ providerId: 'local' });
+  repo.appendMessage(conv.id, 'user', 'hello');
+  mockFetch.mockResolvedValue(
+    new Response(
+      JSON.stringify({ choices: [{ message: { content: '云端标题' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+
+  const res = await request('POST', `${base}/api/workshop/conversations/${conv.id}/title`);
+  expect(res.status).toBe(200);
+  expect(res.data.title).toBe('云端标题');
+  expect(mockFetch.mock.calls[0][0]).toBe('http://cloud.example.com/v1/chat/completions');
+});
+
+test('title generation returns 400 when no provider is configured', async () => {
+  saveProviderConfig({
+    local: { kind: 'ollama', baseUrl: '', model: '' },
+    cloud: { kind: 'openai-compatible', baseUrl: '', model: '' },
+  });
+  const { data: conv } = await createConversation({});
+  repo.appendMessage(conv.id, 'user', 'hello');
+  const res = await request('POST', `${base}/api/workshop/conversations/${conv.id}/title`);
+  expect(res.status).toBe(400);
+  expect(res.data.error).toContain('no LLM provider configured');
 });
 
 test('presets: list returns builtin presets with instructions', async () => {

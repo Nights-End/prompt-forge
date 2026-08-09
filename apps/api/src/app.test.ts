@@ -164,32 +164,3 @@ test('delete', async () => {
   const missing = await json('GET', `/api/prompts/${id}`);
   expect(missing.status).toBe(404);
 });
-
-test('default prompt: get 404 before set, set + switch + delete', async () => {
-  const none = await json('GET', '/api/prompts/default');
-  expect(none.status).toBe(404);
-
-  const a = await json('POST', '/api/prompts', { title: 'Default A', content: 'prompt a' });
-  const b = await json('POST', '/api/prompts', { title: 'Default B', content: 'prompt b' });
-
-  const setA = await json('POST', `/api/prompts/${a.data.id}/default`);
-  expect(setA.status).toBe(200);
-  expect(setA.data.id).toBe(a.data.id);
-
-  const got = await json('GET', '/api/prompts/default');
-  expect(got.data.id).toBe(a.data.id);
-
-  const setB = await json('POST', `/api/prompts/${b.data.id}/default`);
-  expect(setB.status).toBe(200);
-
-  const switched = await json('GET', '/api/prompts/default');
-  expect(switched.data.id).toBe(b.data.id);
-
-  const missing = await json('POST', '/api/prompts/nope/default');
-  expect(missing.status).toBe(404);
-
-  const del = await fetch(`${base}/api/prompts/${b.data.id}`, { method: 'DELETE' });
-  expect(del.status).toBe(204);
-  const gone = await json('GET', '/api/prompts/default');
-  expect(gone.status).toBe(404);
-});

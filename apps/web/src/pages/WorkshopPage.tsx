@@ -35,6 +35,39 @@ function deriveTitle(content: string): string {
   return line.length > 40 ? `${line.slice(0, 40)}…` : line || '新对话';
 }
 
+function dataUrlToFile(dataUrl: string, index: number): File {
+  const [meta, data] = dataUrl.split(',');
+  const mime = /^data:([^;]+)/.exec(meta)?.[1] ?? 'image/jpeg';
+  const bin = atob(data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const ext = mime === 'image/png' ? 'png' : 'jpg';
+  return new File([bytes], `reference-${index + 1}.${ext}`, { type: mime });
+}
+
+function SaveFilePreview({
+  file,
+  onRemove,
+}: {
+  file: File;
+  onRemove: () => void;
+}) {
+  const [url] = useState(() => URL.createObjectURL(file));
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+  return (
+    <div className={styles.imagePreviewItem}>
+      <img src={url} alt="" className={styles.imageThumb} />
+      <button
+        className={styles.imageRemove}
+        onClick={onRemove}
+        title="移除"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 function compressImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -387,6 +420,7 @@ export default function WorkshopPage() {
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState('');
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [generatingTitle, setGeneratingTitle] = useState(false);
 
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveTitle, setSaveTitle] = useState('');
@@ -396,11 +430,22 @@ export default function WorkshopPage() {
   const [savedPrompt, setSavedPrompt] = useState<{ id: string; title: string } | null>(
     null,
   );
+  const [saveFiles, setSaveFiles] = useState<File[]>([]);
+  const saveFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [saveParamsOpen, setSaveParamsOpen] = useState(false);
+  const [saveParams, setSaveParams] = useState<Record<string, string>>({});
 
   const [images, setImages] = useState<string[]>([]);
   const [toolSearchQuery, setToolSearchQuery] = useState<string | null>(null);
+  const [visionStatus, setVisionStatus] = useState<string | null>(null);
   const [searchEnabled, setSearchEnabled] = useState(false);
   const inputFileRef = useRef<HTMLInputElement | null>(null);
+
+  const [reverseBusy, setReverseBusy] = useState(false);
+  const reverseStopRef = useRef<AbortController | null>(null);
+  const reverseAccRef = useRef('');
+  const reverseFlushTimerRef = useRef<number | null>(null);
 
   const stopRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -417,6 +462,14 @@ export default function WorkshopPage() {
     }
     streamTextRef.current = '';
     streamDirtyRef.current = false;
+  }
+
+  function stopReverseFlush() {
+    if (reverseFlushTimerRef.current !== null) {
+      window.clearInterval(reverseFlushTimerRef.current);
+      reverseFlushTimerRef.current = null;
+    }
+    reverseAccRef.current = '';
   }
 
   const refreshHistory = useCallback(async () => {
@@ -496,12 +549,6 @@ export default function WorkshopPage() {
           }
         } else {
           setConversation(null);
-          try {
-            const def = await api.getDefaultPrompt();
-            if (!cancelled && def) setCurrentPrompt(def.content);
-          } catch {
-            // no default prompt set; start with an empty editor
-          }
         }
         await refreshHistory();
       } catch (e) {
@@ -530,6 +577,38 @@ export default function WorkshopPage() {
       setTitle(updated.title);
     } catch (e) {
       setBanner(e instanceof Error ? e.message : '保存标题失败');
+    }
+  }
+
+  async function handleGenerateTitle() {
+    if (!conversation || generatingTitle) return;
+    setGeneratingTitle(true);
+    try {
+      const { title: generated } = await api.generateConversationTitle(
+        conversation.id,
+        currentPrompt.trim() || undefined,
+      );
+      setTitle(generated);
+      setConversation({ ...conversation, title: generated });
+      setBanner(`标题已生成：${generated}`);
+      setTimeout(() => setBanner(''), 2500);
+    } catch (e) {
+      setBanner(e instanceof Error ? e.message : '生成标题失败');
+    } finally {
+      setGeneratingTitle(false);
+    }
+  }
+
+  async function autoGenerateTitle(convId: string) {
+    try {
+      const { title: generated } = await api.generateConversationTitle(
+        convId,
+        currentPrompt.trim() || undefined,
+      );
+      setTitle(generated);
+      setConversation((c) => (c && c.id === convId ? { ...c, title: generated } : c));
+    } catch {
+      // keep the first-line derived title when the LLM is unavailable
     }
   }
 
@@ -642,6 +721,70 @@ export default function WorkshopPage() {
     e.target.value = '';
   }
 
+  async function handleReverse() {
+    if (reverseBusy || streaming || images.length === 0) return;
+    const firstRound = messages.length === 0;
+    let conv = conversation;
+    if (!conv) {
+      if (!providers) return;
+      try {
+        conv = await api.createConversation({
+          promptId: promptIdParam || undefined,
+          providerId: defaultProvider(providers),
+          title: deriveTitle('反推提示词'),
+          extraSystemPrompt: defaultExtraPromptRef.current || undefined,
+        });
+        setConversation(conv);
+        setTitle(conv.title);
+        setExtraPrompt(conv.extraSystemPrompt ?? '');
+        setSearchEnabled(conv.enableSearch ?? false);
+        setMessages([]);
+        await refreshHistory();
+      } catch (e) {
+        setBanner(e instanceof Error ? e.message : '创建会话失败');
+        return;
+      }
+    }
+    const convId = conv.id;
+    const sendingImages = [...images];
+    setReverseBusy(true);
+    setBanner('');
+    setStreamError(null);
+    setCurrentPrompt('');
+    stopReverseFlush();
+    reverseStopRef.current = new AbortController();
+
+    await api.streamReverse(
+      convId,
+      { images: sendingImages },
+      {
+        onChunk: (text) => {
+          reverseAccRef.current += text;
+          if (reverseFlushTimerRef.current === null) {
+            reverseFlushTimerRef.current = window.setInterval(() => {
+              setCurrentPrompt(reverseAccRef.current);
+            }, STREAM_FLUSH_MS);
+          }
+        },
+        onDone: ({ content }) => {
+          stopReverseFlush();
+          setCurrentPrompt(content);
+          setBanner('提示词反推完成');
+          setTimeout(() => setBanner(''), 2000);
+          refreshHistory();
+          if (firstRound && conv) void autoGenerateTitle(conv.id);
+        },
+        onError: (message) => {
+          stopReverseFlush();
+          setBanner(message);
+        },
+      },
+      reverseStopRef.current.signal,
+    );
+    stopReverseFlush();
+    setReverseBusy(false);
+  }
+
   async function handleSearchToggle() {
     let conv = conversation;
     if (!conv) {
@@ -679,6 +822,7 @@ export default function WorkshopPage() {
   async function handleSend() {
     const content = input.trim();
     if (!content || streaming) return;
+    const firstRound = messages.length === 0;
     let conv = conversation;
     if (!conv) {
       if (!providers) return;
@@ -730,6 +874,7 @@ export default function WorkshopPage() {
         onChunk: (text) => {
           streamTextRef.current += text;
           streamDirtyRef.current = true;
+          setVisionStatus(null);
           if (flushTimerRef.current === null) {
             flushTimerRef.current = window.setInterval(() => {
               if (streamDirtyRef.current) {
@@ -754,15 +899,20 @@ export default function WorkshopPage() {
           ]);
           setStreamText('');
           setToolSearchQuery(null);
+          setVisionStatus(null);
         },
         onError: (message) => {
           setStreamError(message);
           setStreamText('');
           setToolSearchQuery(null);
+          setVisionStatus(null);
           setMessages((m) => (m.at(-1)?.role === 'user' ? m.slice(0, -1) : m));
         },
         onToolSearch: (query) => {
           setToolSearchQuery(query);
+        },
+        onVision: (status) => {
+          setVisionStatus(status);
         },
       },
       stopRef.current.signal,
@@ -770,6 +920,7 @@ export default function WorkshopPage() {
     stopFlushTimer();
     setStreaming(false);
     refreshHistory();
+    if (firstRound && conv) void autoGenerateTitle(conv.id);
   }
 
   function handleStop() {
@@ -778,6 +929,7 @@ export default function WorkshopPage() {
     setStreaming(false);
     setStreamText('');
     setToolSearchQuery(null);
+    setVisionStatus(null);
     setMessages((m) => (m.at(-1)?.role === 'user' ? m.slice(0, -1) : m));
   }
 
@@ -812,8 +964,12 @@ export default function WorkshopPage() {
           .split(',')
           .map((t) => t.trim())
           .filter(Boolean),
-        type: 'text',
+        type: saveFiles.length > 0 ? 'multimodal' : 'text',
+        parameters: saveParams,
       });
+      if (saveFiles.length > 0) {
+        await api.uploadAssets(p.id, saveFiles);
+      }
       setSavedPrompt({ id: p.id, title: p.title });
     } catch (e) {
       setBanner(e instanceof Error ? e.message : '保存提示词失败');
@@ -861,16 +1017,26 @@ export default function WorkshopPage() {
       {banner && <div className={styles.banner}>{banner}</div>}
 
       <div className={styles.settingsBar}>
-        <input
-          className={styles.titleInput}
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={handleSaveTitle}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-          }}
-          placeholder="会话标题"
-        />
+        <div className={styles.titleWrap}>
+          <input
+            className={styles.titleInput}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={handleSaveTitle}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            }}
+            placeholder="会话标题"
+          />
+          <button
+            className={styles.smallBtn}
+            onClick={handleGenerateTitle}
+            disabled={generatingTitle || !conversation || streaming || messages.length === 0}
+            title="根据会话内容用 AI 生成标题"
+          >
+            {generatingTitle ? '生成中…' : 'AI 生成'}
+          </button>
+        </div>
         <label className={styles.setting}>
           <span>预设</span>
           <select
@@ -1019,6 +1185,9 @@ export default function WorkshopPage() {
                 🔍 正在搜索：{toolSearchQuery}
               </div>
             )}
+            {visionStatus && (
+              <div className={styles.searchPill}>🖼 正在分析参考图…</div>
+            )}
             {streaming && (
               <div className={styles.assistantRow}>
                 <div className={styles.assistantBubble}>
@@ -1076,7 +1245,7 @@ export default function WorkshopPage() {
               }}
               placeholder="描述你的想法…（Enter 发送，Shift+Enter 换行，可粘贴/拖拽图片）"
               rows={3}
-              disabled={streaming}
+              disabled={streaming || reverseBusy}
             />
             {images.length > 0 && (
               <div className={styles.imagePreviews}>
@@ -1098,7 +1267,7 @@ export default function WorkshopPage() {
               <button
                 className={styles.undoBtn}
                 onClick={handleUndo}
-                disabled={streaming || !conversation || messages.length === 0}
+                disabled={streaming || reverseBusy || !conversation || messages.length === 0}
                 title="删除最后一条消息及其回复，可重新提问"
               >
                 ↩ 撤销上一条
@@ -1113,7 +1282,7 @@ export default function WorkshopPage() {
               />
               <button
                 onClick={() => inputFileRef.current?.click()}
-                disabled={streaming || images.length >= MAX_IMAGES}
+                disabled={streaming || reverseBusy || images.length >= MAX_IMAGES}
                 title={
                   images.length >= MAX_IMAGES
                     ? `最多 ${MAX_IMAGES} 张`
@@ -1125,12 +1294,20 @@ export default function WorkshopPage() {
                   参考图{images.length > 0 ? ` (${images.length}/${MAX_IMAGES})` : ''}
                 </span>
               </button>
+              <button
+                className={styles.reverseBtn}
+                onClick={handleReverse}
+                disabled={streaming || reverseBusy || images.length === 0}
+                title="将参考图反推为完整文生图提示词，结果填入当前提示词"
+              >
+                {reverseBusy ? '反推中…' : '✨ 反推提示词'}
+              </button>
               {streaming ? (
                 <button onClick={handleStop}>停止</button>
               ) : (
                 <button
                   onClick={handleSend}
-                  disabled={!input.trim()}
+                  disabled={!input.trim() || reverseBusy}
                 >
                   发送
                 </button>
@@ -1162,6 +1339,9 @@ export default function WorkshopPage() {
                 setSaveOpen(true);
                 setSaveTitle(conversation?.title ?? '');
                 setSavedPrompt(null);
+                setSaveFiles(images.map(dataUrlToFile));
+                setSaveParams({});
+                setSaveParamsOpen(false);
               }}
             >
               保存为提示词
@@ -1191,6 +1371,151 @@ export default function WorkshopPage() {
                   placeholder="cat, cyberpunk"
                 />
               </label>
+              <div className={styles.saveField}>
+                <button
+                  type="button"
+                  className={styles.paramToggle}
+                  onClick={() => setSaveParamsOpen((o) => !o)}
+                >
+                  {saveParamsOpen ? '收起生成参数' : '生成参数 ▸'}
+                </button>
+                {saveParamsOpen && (
+                  <div className={styles.saveParamBody}>
+                    <div className={styles.saveParamGrid}>
+                      {(['model', 'steps', 'sampler', 'cfg', 'seed', 'resolution', 'negativePrompt'] as const).map((key) => {
+                        const labels: Record<string, string> = { model: '模型', steps: '步数', sampler: '采样器', cfg: 'CFG', seed: '种子', resolution: '分辨率', negativePrompt: '负面提示词' };
+                        return (
+                          <label key={key} className={styles.saveParamField}>
+                            <span>{labels[key]}</span>
+                            {key === 'negativePrompt' ? (
+                              <textarea
+                                rows={2}
+                                value={saveParams[key] ?? ''}
+                                onChange={(e) => setSaveParams((p: Record<string, string>) => ({ ...p, [key]: e.target.value.trim() }))}
+                                placeholder="负面提示词（可选）"
+                              />
+                            ) : (
+                              <input
+                                type="text"
+                                value={saveParams[key] ?? ''}
+                                onChange={(e) => setSaveParams((p: Record<string, string>) => ({ ...p, [key]: e.target.value.trim() }))}
+                                placeholder={key === 'model' ? 'SDXL / Flux...' : ''}
+                              />
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div className={styles.saveParamCustoms}>
+                      {Object.keys(saveParams)
+                        .filter((k) => !['model','steps','sampler','cfg','seed','resolution','negativePrompt'].includes(k))
+                        .map((key) => (
+                          <div key={key} className={styles.saveParamRow}>
+                            <input
+                              type="text"
+                              className={styles.saveParamKey}
+                              value={key}
+                              onChange={(e) => {
+                                const newKey = e.target.value.trim();
+                                const value = saveParams[key] ?? '';
+                                setSaveParams((p) => {
+                                  const next = { ...p };
+                                  delete next[key];
+                                  if (newKey) next[newKey] = value;
+                                  return next;
+                                });
+                              }}
+                              placeholder="参数名"
+                            />
+                            <input
+                              type="text"
+                              className={styles.saveParamVal}
+                              value={saveParams[key] ?? ''}
+                              onChange={(e) =>
+                                setSaveParams((p) => ({ ...p, [key]: e.target.value }))
+                              }
+                              placeholder="值"
+                            />
+                            <button
+                              type="button"
+                              className={styles.paramRemove}
+                              onClick={() =>
+                                setSaveParams((p) => {
+                                  const next = { ...p };
+                                  delete next[key];
+                                  return next;
+                                })
+                              }
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      <button
+                        type="button"
+                        className={styles.paramAdd}
+                        onClick={() =>
+                          setSaveParams((p) => {
+                            let i = 0;
+                            let k = 'custom1';
+                            while (k in p) k = `custom${++i}`;
+                            return { ...p, [k]: '' };
+                          })
+                        }
+                      >
+                        + 自定义参数
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className={styles.saveField}>
+                <span>图片（可选，随提示词保存）</span>
+                <div className={styles.saveFileActions}>
+                  <input
+                    ref={saveFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    hidden
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files ?? []);
+                      setSaveFiles((prev) => [
+                        ...prev,
+                        ...files.slice(0, MAX_IMAGES - prev.length),
+                      ]);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => saveFileInputRef.current?.click()}
+                    disabled={saveFiles.length >= MAX_IMAGES}
+                  >
+                    选择图片…
+                  </button>
+                  <span className={styles.saveFileHint}>
+                    {saveFiles.length > 0
+                      ? `${saveFiles.length}/${MAX_IMAGES}`
+                      : `最多 ${MAX_IMAGES} 张`}
+                  </span>
+                </div>
+                {saveFiles.length > 0 && (
+                  <div className={styles.imagePreviews}>
+                    {saveFiles.map((f, idx) => (
+                      <SaveFilePreview
+                        key={`${f.name}-${idx}`}
+                        file={f}
+                        onRemove={() =>
+                          setSaveFiles((prev) =>
+                            prev.filter((_, i) => i !== idx),
+                          )
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className={styles.saveActions}>
                 <button
                   onClick={handleSavePrompt}

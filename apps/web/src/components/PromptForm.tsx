@@ -52,6 +52,49 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
     }));
   }
 
+  const [paramOpen, setParamOpen] = useState(false);
+
+  const FIXED_PARAM_KEYS = [
+    'model', 'steps', 'sampler', 'cfg', 'seed',
+    'resolution', 'negativePrompt',
+  ] as const;
+
+  const PARAM_LABELS: Record<string, string> = {
+    model: '模型', steps: '步数', sampler: '采样器',
+    cfg: 'CFG', seed: '种子', resolution: '分辨率',
+    negativePrompt: '负面提示词',
+  };
+
+  const PARAM_PLACEHOLDERS: Record<string, string> = {
+    model: 'SDXL / Flux...', steps: '30', sampler: 'DPM++ 2M Karras',
+    cfg: '7', seed: '随机种子', resolution: '1024x1024',
+  };
+
+  function setParam(key: string, value: string) {
+    setForm((f) => ({
+      ...f,
+      parameters: { ...f.parameters, [key]: value.trim() || undefined },
+    }));
+  }
+
+  function removeCustomParam(key: string) {
+    setForm((f) => {
+      const next = { ...f.parameters };
+      delete next[key];
+      return { ...f, parameters: next };
+    });
+  }
+
+  function addCustomParam() {
+    let i = 0;
+    let key = 'custom1';
+    while (key in form.parameters) key = `custom${++i}`;
+    setForm((f) => ({
+      ...f,
+      parameters: { ...f.parameters, [key]: '' },
+    }));
+  }
+
   return (
     <form className={styles.form} onSubmit={handleSubmit}>
       <label className={styles.field}>
@@ -139,6 +182,83 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
           )}
         </div>
       )}
+
+      <div className={styles.paramSection}>
+        <button
+          type="button"
+          className={styles.paramToggle}
+          onClick={() => setParamOpen((o) => !o)}
+        >
+          {paramOpen ? '收起生成参数' : '生成参数 ▸'}
+        </button>
+        {paramOpen && (
+          <div className={styles.paramBody}>
+            <div className={styles.paramGrid}>
+              {FIXED_PARAM_KEYS.map((key) => (
+                <label key={key} className={styles.paramField}>
+                  <span>{PARAM_LABELS[key] ?? key}</span>
+                  {key === 'negativePrompt' ? (
+                    <textarea
+                      rows={2}
+                      value={form.parameters[key] ?? ''}
+                      onChange={(e) => setParam(key, e.target.value)}
+                      placeholder="负面提示词（可选）"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={form.parameters[key] ?? ''}
+                      onChange={(e) => setParam(key, e.target.value)}
+                      placeholder={PARAM_PLACEHOLDERS[key] ?? ''}
+                    />
+                  )}
+                </label>
+              ))}
+            </div>
+            <div className={styles.paramCustoms}>
+              {Object.keys(form.parameters)
+                .filter((k) => !(FIXED_PARAM_KEYS as readonly string[]).includes(k))
+                .map((key) => (
+                  <div key={key} className={styles.paramCustomRow}>
+                    <input
+                      type="text"
+                      className={styles.paramCustomKey}
+                      value={key}
+                      onChange={(e) => {
+                        const newKey = e.target.value.trim();
+                        const value = form.parameters[key] ?? '';
+                        removeCustomParam(key);
+                        if (newKey) setParam(newKey, value);
+                      }}
+                      placeholder="参数名"
+                    />
+                    <input
+                      type="text"
+                      className={styles.paramCustomVal}
+                      value={form.parameters[key] ?? ''}
+                      onChange={(e) => setParam(key, e.target.value)}
+                      placeholder="值"
+                    />
+                    <button
+                      type="button"
+                      className={styles.paramRemove}
+                      onClick={() => removeCustomParam(key)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              <button
+                type="button"
+                className={styles.paramAdd}
+                onClick={addCustomParam}
+              >
+                + 自定义参数
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className={styles.row}>
         <label className={styles.field}>

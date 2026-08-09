@@ -67,6 +67,14 @@
   box-shadow: var(--shadow-sm);
 }
 
+.titleWrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 220px;
+}
+
 .titleInput {
   flex: 1;
   min-width: 160px;
@@ -325,6 +333,26 @@
   border-radius: 6px;
 }
 
+.reverseBtn {
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-2);
+  border: 1px solid color-mix(in srgb, var(--accent-2) 45%, transparent);
+}
+
+.reverseBtn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.reverseBtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .editorPane {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -383,11 +411,114 @@
   color: var(--muted);
 }
 
+.saveFileActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.saveFileHint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .saveActions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.paramToggle {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.paramToggle:hover {
+  color: var(--text);
+}
+
+.saveParamBody {
+  margin-top: 8px;
+}
+
+.saveParamGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+}
+
+.saveParamField {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.saveParamField span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.saveParamField textarea {
+  resize: vertical;
+  min-height: 44px;
+  font-size: 13px;
+}
+
+.saveParamCustoms {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.saveParamRow {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.saveParamKey {
+  flex: 0 0 110px;
+  font-size: 12px;
+}
+
+.saveParamVal {
+  flex: 1;
+  font-size: 12px;
+}
+
+.paramRemove {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.paramRemove:hover {
+  color: var(--danger);
+}
+
+.paramAdd {
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed var(--border-strong);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.paramAdd:hover {
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 .savedLink {

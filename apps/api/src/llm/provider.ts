@@ -1,7 +1,9 @@
 import {
   loadProviderConfig,
+  loadVisionConfig,
   normalizeBaseUrl,
   resolveApiKey,
+  resolveVisionApiKey,
   type ProviderId,
   type ProviderSettings,
 } from './config.js';
@@ -53,6 +55,84 @@ export function resolveUpstream(providerId: ProviderId): ResolveUpstreamResult {
 export type ChatCompletionsResult =
   | { ok: true; response: Response }
   | { ok: false; error: string };
+
+export const VISION_DESCRIBE_SYSTEM_PROMPT =
+  '你是图片描述助手。请用中文依次描述下面的参考图，每张图以"参考图 N："开头。' +
+  '重点描述与文生图提示词相关的主题、风格、构图、颜色、材质、光线等视觉细节。' +
+  '直接给出描述，不要其他说明。';
+
+export const VISION_DESCRIBE_MARKER = '[参考图描述]';
+
+export type DescribeImagesResult =
+  | { ok: true; text: string }
+  | { ok: false; error: string };
+
+export function resolveVisionUpstream(): ResolveUpstreamResult {
+  const settings = loadVisionConfig();
+
+  const baseUrl = normalizeBaseUrl(settings.kind, settings.baseUrl);
+  if (!baseUrl) {
+    return {
+      ok: false,
+      error: 'vision provider is not configured (missing baseUrl)',
+    };
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (settings.kind === 'openai-compatible') {
+    const apiKey = resolveVisionApiKey(settings);
+    if (!apiKey) {
+      return {
+        ok: false,
+        error:
+          'vision api key not configured (set PF_VISION_API_KEY or save one in settings)',
+      };
+    }
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  return {
+    ok: true,
+    value: { baseUrl, headers, model: settings.model || undefined },
+  };
+}
+
+export async function describeImages(
+  fetchImpl: typeof fetch,
+  target: UpstreamTarget,
+  images: string[],
+  signal: AbortSignal,
+): Promise<DescribeImagesResult> {
+  const parts: (
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string } }
+  )[] = [
+    { type: 'text', text: VISION_DESCRIBE_SYSTEM_PROMPT },
+    ...images.map((url) => ({ type: 'image_url' as const, image_url: { url } })),
+  ];
+
+  const result = await chatCompletions(
+    fetchImpl,
+    target,
+    {
+      messages: [
+        { role: 'system', content: 'You are an image captioning assistant.' },
+        { role: 'user', content: parts },
+      ],
+    },
+    signal,
+  );
+  if (!result.ok) return result;
+
+  const data = (await result.response.json()) as {
+    choices?: { message?: { content?: unknown } }[];
+  };
+  const text = data.choices?.[0]?.message?.content;
+  if (typeof text !== 'string' || !text.trim()) {
+    return { ok: false, error: 'vision model returned an empty description' };
+  }
+  return { ok: true, text: text.trim() };
+}
 
 export interface ChatCompletionsBody {
   model?: string;

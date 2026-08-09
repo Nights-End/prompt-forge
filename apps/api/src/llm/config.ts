@@ -78,6 +78,60 @@ export function resolveApiKey(settings: ProviderSettings): string | undefined {
   return process.env.PF_LLM_API_KEY || settings.apiKey || undefined;
 }
 
+export function resolveVisionConfigPath(): string {
+  const env = process.env.VISION_CONFIG_PATH;
+  if (env) return path.resolve(env);
+  return path.join(resolveDataDir(), 'vision.json');
+}
+
+const DEFAULT_VISION: ProviderSettings = {
+  kind: 'openai-compatible',
+  baseUrl: '',
+  model: '',
+  apiKey: undefined,
+};
+
+function normalizeVisionSettings(
+  raw: Partial<ProviderSettings> | undefined,
+): ProviderSettings {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_VISION };
+  return {
+    kind:
+      typeof raw.kind === 'string' && (PROVIDER_KINDS as string[]).includes(raw.kind)
+        ? (raw.kind as ProviderKind)
+        : DEFAULT_VISION.kind,
+    baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl.trim() : DEFAULT_VISION.baseUrl,
+    model: typeof raw.model === 'string' ? raw.model.trim() : DEFAULT_VISION.model,
+    apiKey: typeof raw.apiKey === 'string' && raw.apiKey ? raw.apiKey : undefined,
+  };
+}
+
+export function loadVisionConfig(): ProviderSettings {
+  const filePath = resolveVisionConfigPath();
+  let raw: Partial<ProviderSettings> | undefined;
+  try {
+    raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Partial<ProviderSettings>;
+  } catch {
+    // missing or corrupt -> defaults
+  }
+  return normalizeVisionSettings(raw);
+}
+
+export function saveVisionConfig(config: ProviderSettings): void {
+  const filePath = resolveVisionConfigPath();
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(config, null, 2), { mode: 0o600 });
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch {
+    // chmod is a no-op on Windows; key protection relies on local filesystem ACLs
+  }
+}
+
+export function resolveVisionApiKey(settings: ProviderSettings): string | undefined {
+  return process.env.PF_VISION_API_KEY || settings.apiKey || undefined;
+}
+
 export function normalizeBaseUrl(kind: ProviderKind, baseUrl: string): string {
   let url = baseUrl.trim().replace(/\/+$/, '');
   if (!url) return url;

@@ -2,6 +2,17 @@ export type PromptType = 'text' | 'multimodal';
 
 export type AssetKind = 'image' | 'audio' | 'file';
 
+export interface PromptParameters {
+  model?: string;
+  steps?: string;
+  sampler?: string;
+  cfg?: string;
+  seed?: string;
+  resolution?: string;
+  negativePrompt?: string;
+  [key: string]: string | undefined;
+}
+
 export interface Prompt {
   id: string;
   title: string;
@@ -12,6 +23,7 @@ export interface Prompt {
   variables: string[];
   isFavorite: boolean;
   type: PromptType;
+  parameters: PromptParameters;
   createdAt: string;
   updatedAt: string;
 }
@@ -24,6 +36,7 @@ export interface PromptInput {
   tags?: string[];
   isFavorite?: boolean;
   type?: PromptType;
+  parameters?: PromptParameters;
 }
 
 export interface Asset {

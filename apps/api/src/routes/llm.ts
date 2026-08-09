@@ -20,7 +20,7 @@ interface ChatMessage {
   content: string;
 }
 
-function pickProviderId(): ProviderId | null {
+export function pickProviderId(): ProviderId | null {
   for (const id of ['cloud', 'local'] as ProviderId[]) {
     const settings = loadProviderConfig()[id];
     if (!settings.baseUrl) continue;
@@ -30,7 +30,7 @@ function pickProviderId(): ProviderId | null {
   return null;
 }
 
-function cleanTitle(raw: string): string {
+export function cleanTitle(raw: string): string {
   const line = raw.split(/\r?\n/)[0].trim();
   const cleaned = line.replace(/^["'「『“]+|["'」』”]+$/g, '').trim();
   return cleaned.length > MAX_TITLE_CHARS

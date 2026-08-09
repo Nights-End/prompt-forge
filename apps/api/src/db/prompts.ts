@@ -1,4 +1,4 @@
-import type { Prompt, PromptInput, PromptType } from '@prompt-forge/shared';
+import type { Prompt, PromptInput, PromptParameters, PromptType } from '@prompt-forge/shared';
 import { extractVariables } from '@prompt-forge/shared';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
@@ -13,11 +13,18 @@ interface PromptRow {
   variables: string;
   isFavorite: number;
   type: string;
+  parameters: string;
   createdAt: string;
   updatedAt: string;
 }
 
 function rowToPrompt(row: PromptRow): Prompt {
+  let parameters: PromptParameters = {};
+  try {
+    parameters = JSON.parse(row.parameters) as PromptParameters;
+  } catch {
+    // keep empty object on parse failure
+  }
   return {
     id: row.id,
     title: row.title,
@@ -28,6 +35,7 @@ function rowToPrompt(row: PromptRow): Prompt {
     variables: JSON.parse(row.variables) as string[],
     isFavorite: row.isFavorite === 1,
     type: row.type as PromptType,
+    parameters,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -42,6 +50,7 @@ function rowToRowValues(prompt: PromptInput): {
   variables: string;
   isFavorite: number;
   type: string;
+  parameters: string;
 } {
   return {
     title: prompt.title,
@@ -52,6 +61,7 @@ function rowToRowValues(prompt: PromptInput): {
     variables: JSON.stringify(extractVariables(prompt.content)),
     isFavorite: prompt.isFavorite ? 1 : 0,
     type: prompt.type ?? 'text',
+    parameters: JSON.stringify(prompt.parameters ?? {}),
   };
 }
 
@@ -125,10 +135,10 @@ export class PromptRepository {
     };
     this.db
       .prepare(
-        `INSERT INTO prompts
-           (id, title, content, description, category, tags, variables, isFavorite, type, createdAt, updatedAt)
-         VALUES
-           (@id, @title, @content, @description, @category, @tags, @variables, @isFavorite, @type, @createdAt, @updatedAt)`,
+       `INSERT INTO prompts
+            (id, title, content, description, category, tags, variables, isFavorite, type, parameters, createdAt, updatedAt)
+          VALUES
+            (@id, @title, @content, @description, @category, @tags, @variables, @isFavorite, @type, @parameters, @createdAt, @updatedAt)`,
       )
       .run(row);
     return rowToPrompt(row);
@@ -146,6 +156,7 @@ export class PromptRepository {
       tags: input.tags ?? existing.tags,
       isFavorite: input.isFavorite ?? existing.isFavorite,
       type: input.type ?? existing.type,
+      parameters: input.parameters ?? existing.parameters,
     });
     const row: PromptRow = {
       id,
@@ -155,17 +166,18 @@ export class PromptRepository {
     };
     this.db
       .prepare(
-        `UPDATE prompts SET
-           title = @title,
-           content = @content,
-           description = @description,
-           category = @category,
-           tags = @tags,
-           variables = @variables,
-           isFavorite = @isFavorite,
-           type = @type,
-           updatedAt = @updatedAt
-         WHERE id = @id`,
+       `UPDATE prompts SET
+            title = @title,
+            content = @content,
+            description = @description,
+            category = @category,
+            tags = @tags,
+            variables = @variables,
+            isFavorite = @isFavorite,
+            type = @type,
+            parameters = @parameters,
+            updatedAt = @updatedAt
+          WHERE id = @id`,
       )
       .run(row);
     return rowToPrompt(row);
@@ -174,23 +186,6 @@ export class PromptRepository {
   delete(id: string): boolean {
     const result = this.db.prepare('DELETE FROM prompts WHERE id = ?').run(id);
     return result.changes > 0;
-  }
-
-  setDefault(id: string): Prompt | null {
-    const existing = this.getById(id);
-    if (!existing) return null;
-    this.db.transaction(() => {
-      this.db.prepare('UPDATE prompts SET isDefault = 0').run();
-      this.db.prepare('UPDATE prompts SET isDefault = 1 WHERE id = ?').run(id);
-    })();
-    return this.getById(id);
-  }
-
-  getDefault(): Prompt | null {
-    const row = this.db
-      .prepare('SELECT * FROM prompts WHERE isDefault = 1 ORDER BY updatedAt DESC LIMIT 1')
-      .get() as PromptRow | undefined;
-    return row ? rowToPrompt(row) : null;
   }
 
   categories(): string[] {

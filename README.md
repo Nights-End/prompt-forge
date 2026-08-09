@@ -53,8 +53,6 @@ PUT    /api/prompts/:id           更新
 DELETE /api/prompts/:id           删除
 GET    /api/prompts/:id/variables 解析变量列表
 POST   /api/prompts/render        渲染模板 {content, values}
-GET    /api/prompts/default       获取默认提示词（未设置时 404）
-POST   /api/prompts/:id/default   将指定提示词设为默认（全局唯一，自动替换旧的）
 GET    /api/meta/categories       所有分类
 GET    /api/export                导出全部为 JSON
 POST   /api/import                从 JSON 导入

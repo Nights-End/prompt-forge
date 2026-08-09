@@ -5,6 +5,8 @@ import {
   ProviderKind,
   ProviderPublicSettings,
   ProviderSettingsInput,
+  VisionPublicSettings,
+  VisionSettingsInput,
 } from '../types';
 import styles from './SettingsPage.module.css';
 
@@ -37,6 +39,16 @@ export default function SettingsPage() {
   const [loadingModels, setLoadingModels] = useState<Record<string, boolean>>({});
   const [modelErrors, setModelErrors] = useState<Record<string, string>>({});
 
+  const [visionConfig, setVisionConfig] = useState<VisionPublicSettings | null>(null);
+  const [visionDraft, setVisionDraft] = useState<
+    VisionSettingsInput & { apiKey: string }
+  >({ kind: 'openai-compatible', baseUrl: '', model: '', apiKey: '' });
+  const [visionSaving, setVisionSaving] = useState(false);
+  const [visionSaved, setVisionSaved] = useState(false);
+  const [visionModelOptions, setVisionModelOptions] = useState<string[]>([]);
+  const [visionLoadingModels, setVisionLoadingModels] = useState(false);
+  const [visionModelError, setVisionModelError] = useState('');
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -58,6 +70,16 @@ export default function SettingsPage() {
       setSearchConfig(search);
       setSearchProvider(search.provider);
       setSearchApiKey('');
+
+      const vision = await api.getVisionSettings();
+      setVisionConfig(vision);
+      setVisionDraft({
+        kind: vision.kind,
+        baseUrl: vision.baseUrl,
+        model: vision.model,
+        apiKey: '',
+      });
+      setVisionSaved(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载设置失败');
     } finally {
@@ -98,6 +120,55 @@ export default function SettingsPage() {
       }));
     } finally {
       setLoadingModels((m) => ({ ...m, [id]: false }));
+    }
+  }
+
+  function patchVision(key: keyof VisionSettingsInput, value: string) {
+    setVisionDraft((d) => ({ ...d, [key]: value }));
+  }
+
+  async function handleFetchVisionModels() {
+    const baseUrl = visionDraft.baseUrl?.trim() ?? '';
+    if (!baseUrl) {
+      setVisionModelError('请先填写 Base URL');
+      return;
+    }
+    setVisionLoadingModels(true);
+    setVisionModelError('');
+    setVisionModelOptions([]);
+    try {
+      const { models } = await api.fetchModels({
+        id: 'vision',
+        kind: visionDraft.kind ?? 'openai-compatible',
+        baseUrl,
+        apiKey: visionDraft.apiKey || undefined,
+      });
+      setVisionModelOptions(models);
+    } catch (e) {
+      setVisionModelError(e instanceof Error ? e.message : '拉取模型失败');
+    } finally {
+      setVisionLoadingModels(false);
+    }
+  }
+
+  async function handleSaveVision() {
+    setVisionSaving(true);
+    setVisionSaved(false);
+    setError('');
+    try {
+      const result = await api.saveVisionSettings({
+        kind: visionDraft.kind,
+        baseUrl: visionDraft.baseUrl,
+        model: visionDraft.model,
+        apiKey: visionDraft.apiKey || undefined,
+      });
+      setVisionConfig(result);
+      setVisionDraft((d) => ({ ...d, apiKey: '' }));
+      setVisionSaved(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存识图模型设置失败');
+    } finally {
+      setVisionSaving(false);
     }
   }
 
@@ -264,6 +335,110 @@ export default function SettingsPage() {
           {saving ? '保存中…' : '保存'}
         </button>
       </div>
+
+      <h2 className={styles.sectionTitle}>识图模型（参考图）</h2>
+      <p className={styles.sub}>
+        当主模型不支持视觉输入（如 DeepSeek）时，发送参考图会先由识图模型转换为文字描述，再随消息发送给主模型。
+        可配置 Ollama（如 llava、llama3.2-vision）或 OpenAI 兼容的视觉模型（如 GLM-4V、Qwen-VL）。
+        密钥仅保存在本地或从 <code>PF_VISION_API_KEY</code> 环境变量读取。
+      </p>
+
+      {visionConfig && (
+        <div className={styles.card}>
+          <label className={styles.field}>
+            <span>类型</span>
+            <select
+              value={visionDraft.kind}
+              onChange={(e) => patchVision('kind', e.target.value as ProviderKind)}
+            >
+              <option value="ollama">Ollama</option>
+              <option value="openai-compatible">OpenAI 兼容</option>
+            </select>
+          </label>
+
+          <label className={styles.field}>
+            <span>Base URL</span>
+            <input
+              type="text"
+              value={visionDraft.baseUrl}
+              onChange={(e) => patchVision('baseUrl', e.target.value)}
+              placeholder="http://localhost:11434/v1 或 https://api.example.com/v1"
+            />
+          </label>
+
+          <label className={styles.field}>
+            <span>模型</span>
+            <div className={styles.modelRow}>
+              <input
+                type="text"
+                value={visionDraft.model}
+                onChange={(e) => patchVision('model', e.target.value)}
+                placeholder="llava / qwen-vl-plus / glm-4v"
+              />
+              <button
+                type="button"
+                className={styles.fetchBtn}
+                onClick={handleFetchVisionModels}
+                disabled={visionLoadingModels}
+              >
+                {visionLoadingModels ? '…' : '拉取模型'}
+              </button>
+            </div>
+            {visionModelOptions.length > 0 && (
+              <select
+                className={styles.modelSelect}
+                value={visionDraft.model}
+                onChange={(e) => patchVision('model', e.target.value)}
+              >
+                <option value="" disabled>
+                  选择模型…
+                </option>
+                {visionModelOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            )}
+            {visionModelError && (
+              <span className={styles.modelError}>{visionModelError}</span>
+            )}
+          </label>
+
+          <label className={styles.field}>
+            <span>API Key（可选）</span>
+            <input
+              type="password"
+              value={visionDraft.apiKey}
+              onChange={(e) => patchVision('apiKey', e.target.value)}
+              placeholder={
+                visionConfig.hasApiKey || visionConfig.envApiKey
+                  ? '已保存 — 留空则保持不变'
+                  : '使用 PF_VISION_API_KEY 时可留空'
+              }
+            />
+          </label>
+
+          <div className={styles.keyStatus}>
+            {visionConfig.envApiKey && (
+              <span className={styles.ok}>正在使用环境变量 PF_VISION_API_KEY</span>
+            )}
+            {visionConfig.hasApiKey && !visionConfig.envApiKey && (
+              <span className={styles.ok}>密钥已保存在本地</span>
+            )}
+            {!visionConfig.hasApiKey && !visionConfig.envApiKey && (
+              <span className={styles.muted}>未配置密钥</span>
+            )}
+          </div>
+
+          <div className={styles.actions}>
+            {visionSaved && <span className={styles.ok}>已保存 ✓</span>}
+            <button onClick={handleSaveVision} disabled={visionSaving}>
+              {visionSaving ? '保存中…' : '保存识图模型'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <h2 className={styles.sectionTitle}>联网搜索</h2>
       <p className={styles.sub}>

@@ -1,4 +1,4 @@
-import { PromptInput, PromptType } from '@prompt-forge/shared';
+import { PromptInput, PromptParameters, PromptType } from '@prompt-forge/shared';
 
 export interface FormState {
   title: string;
@@ -8,6 +8,7 @@ export interface FormState {
   tags: string;
   isFavorite: boolean;
   type: PromptType;
+  parameters: PromptParameters;
   files: File[];
 }
 
@@ -19,6 +20,7 @@ export const EMPTY_FORM: FormState = {
   tags: '',
   isFavorite: false,
   type: 'text',
+  parameters: {},
   files: [],
 };
 
@@ -34,6 +36,7 @@ export function formToInput(form: FormState): PromptInput {
       .filter(Boolean),
     isFavorite: form.isFavorite,
     type: form.type,
+    parameters: form.parameters,
   };
 }
 
@@ -50,6 +53,21 @@ export interface ProviderPublicSettings {
 }
 
 export interface ProviderSettingsInput {
+  kind?: ProviderKind;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+}
+
+export interface VisionPublicSettings {
+  kind: ProviderKind;
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+  envApiKey: boolean;
+}
+
+export interface VisionSettingsInput {
   kind?: ProviderKind;
   baseUrl?: string;
   model?: string;

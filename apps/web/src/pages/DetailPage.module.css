@@ -213,3 +213,49 @@
   background: var(--overlay);
   border: none;
 }
+
+.paramSection {
+  margin-bottom: 14px;
+}
+
+.paramHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.paramHead h2 {
+  margin: 0;
+}
+
+.paramHead button {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+}
+
+.paramGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+
+.paramItem {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.paramKey {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.paramValue {
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-word;
+}

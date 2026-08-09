@@ -15,6 +15,8 @@ import type {
   ProviderKind,
   ProviderPublicSettings,
   ProviderSettingsInput,
+  VisionPublicSettings,
+  VisionSettingsInput,
 } from '../types';
 
 const BASE = '/api';
@@ -56,9 +58,6 @@ export const api = {
   listPrompts: (query: ListPromptQuery = {}) =>
     request<Prompt[]>(`/prompts${toQuery(query)}`),
   getPrompt: (id: string) => request<Prompt>(`/prompts/${id}`),
-  getDefaultPrompt: () => request<Prompt>('/prompts/default'),
-  setDefaultPrompt: (id: string) =>
-    request<Prompt>(`/prompts/${id}/default`, { method: 'POST' }),
   createPrompt: (input: PromptInput) =>
     request<Prompt>('/prompts', { method: 'POST', body: JSON.stringify(input) }),
   updatePrompt: (id: string, input: PromptInput) =>
@@ -137,8 +136,15 @@ export const api = {
       '/settings/provider',
       { method: 'PUT', body: JSON.stringify({ providers }) },
     ),
+  getVisionSettings: () =>
+    request<VisionPublicSettings>('/settings/vision'),
+  saveVisionSettings: (input: VisionSettingsInput) =>
+    request<VisionPublicSettings>('/settings/vision', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
   fetchModels: (input: {
-    id: ProviderId;
+    id: ProviderId | 'vision';
     kind: ProviderKind;
     baseUrl: string;
     apiKey?: string;
@@ -210,6 +216,11 @@ export const api = {
     request<{ removed: number }>(`/workshop/conversations/${id}/undo`, {
       method: 'POST',
     }),
+  generateConversationTitle: (id: string, currentPrompt?: string) =>
+    request<{ title: string; model?: string }>(
+      `/workshop/conversations/${id}/title`,
+      { method: 'POST', body: JSON.stringify({ currentPrompt }) },
+    ),
   streamChat: async (
     conversationId: string,
     body: { content: string; currentPrompt?: string; images?: string[] },
@@ -218,6 +229,7 @@ export const api = {
       onDone: (payload: { content: string; model?: string }) => void;
       onError: (message: string) => void;
       onToolSearch?: (query: string) => void;
+      onVision?: (status: string) => void;
     },
     signal?: AbortSignal,
   ): Promise<void> => {
@@ -257,6 +269,7 @@ export const api = {
           model?: string;
           message?: string;
           query?: string;
+          status?: string;
         };
         try {
           evt = JSON.parse(data) as typeof evt;
@@ -273,6 +286,81 @@ export const api = {
           handlers.onError(evt.message ?? 'Unknown error');
         } else if (evt.type === 'tool_search' && typeof evt.query === 'string') {
           handlers.onToolSearch?.(evt.query);
+        } else if (evt.type === 'vision' && typeof evt.status === 'string') {
+          handlers.onVision?.(evt.status);
+        }
+      }
+      if (!sawDone && !sawError && !signal?.aborted) {
+        handlers.onError('流式响应中断，未收到完整回复');
+      }
+    } catch (e) {
+      if (!signal?.aborted) {
+        handlers.onError(e instanceof Error ? e.message : 'Stream interrupted');
+      }
+    }
+  },
+  streamReverse: async (
+    conversationId: string,
+    body: { images: string[] },
+    handlers: {
+      onChunk: (text: string) => void;
+      onDone: (payload: { content: string; model?: string }) => void;
+      onError: (message: string) => void;
+    },
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    let res: Response;
+    try {
+      res = await fetch(
+        `${BASE}/workshop/conversations/${conversationId}/reverse`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal,
+        },
+      );
+    } catch (e) {
+      if ((e as Error | null)?.name !== 'AbortError') {
+        handlers.onError(e instanceof Error ? e.message : 'Request failed');
+      }
+      return;
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      handlers.onError(
+        (data as { error?: string } | null)?.error ?? `Request failed (${res.status})`,
+      );
+      return;
+    }
+    if (!res.body) {
+      handlers.onError('Streaming is not supported by this browser');
+      return;
+    }
+    try {
+      let sawDone = false;
+      let sawError = false;
+      for await (const data of parseSseStream(res.body)) {
+        let evt: {
+          type?: string;
+          text?: string;
+          content?: string;
+          model?: string;
+          message?: string;
+        };
+        try {
+          evt = JSON.parse(data) as typeof evt;
+        } catch {
+          continue;
+        }
+        if (evt.type === 'chunk' && typeof evt.text === 'string') {
+          handlers.onChunk(evt.text);
+        } else if (evt.type === 'done') {
+          sawDone = true;
+          handlers.onDone({ content: evt.content ?? '', model: evt.model });
+        } else if (evt.type === 'error') {
+          sawError = true;
+          handlers.onError(evt.message ?? 'Unknown error');
         }
       }
       if (!sawDone && !sawError && !signal?.aborted) {

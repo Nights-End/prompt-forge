@@ -1,0 +1,5 @@
+{
+  "kind": "ollama",
+  "baseUrl": "http://localhost:11434/v1",
+  "model": "huihui_ai/qwen3-vl-abliterated:8b"
+}
