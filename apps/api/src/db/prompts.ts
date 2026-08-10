@@ -11,6 +11,7 @@ interface PromptRow {
   category: string;
   tags: string;
   variables: string;
+  variablePools: string;
   isFavorite: number;
   type: string;
   parameters: string;
@@ -25,6 +26,12 @@ function rowToPrompt(row: PromptRow): Prompt {
   } catch {
     // keep empty object on parse failure
   }
+  let variablePools: Record<string, string[]> = {};
+  try {
+    variablePools = JSON.parse(row.variablePools) as Record<string, string[]>;
+  } catch {
+    // keep empty object on parse failure
+  }
   return {
     id: row.id,
     title: row.title,
@@ -33,6 +40,7 @@ function rowToPrompt(row: PromptRow): Prompt {
     category: row.category,
     tags: JSON.parse(row.tags) as string[],
     variables: JSON.parse(row.variables) as string[],
+    variablePools,
     isFavorite: row.isFavorite === 1,
     type: row.type as PromptType,
     parameters,
@@ -48,6 +56,7 @@ function rowToRowValues(prompt: PromptInput): {
   category: string;
   tags: string;
   variables: string;
+  variablePools: string;
   isFavorite: number;
   type: string;
   parameters: string;
@@ -59,6 +68,7 @@ function rowToRowValues(prompt: PromptInput): {
     category: prompt.category?.trim() || 'general',
     tags: JSON.stringify(prompt.tags ?? []),
     variables: JSON.stringify(extractVariables(prompt.content)),
+    variablePools: JSON.stringify(prompt.variablePools ?? {}),
     isFavorite: prompt.isFavorite ? 1 : 0,
     type: prompt.type ?? 'text',
     parameters: JSON.stringify(prompt.parameters ?? {}),
@@ -136,9 +146,9 @@ export class PromptRepository {
     this.db
       .prepare(
        `INSERT INTO prompts
-            (id, title, content, description, category, tags, variables, isFavorite, type, parameters, createdAt, updatedAt)
+            (id, title, content, description, category, tags, variables, variablePools, isFavorite, type, parameters, createdAt, updatedAt)
           VALUES
-            (@id, @title, @content, @description, @category, @tags, @variables, @isFavorite, @type, @parameters, @createdAt, @updatedAt)`,
+            (@id, @title, @content, @description, @category, @tags, @variables, @variablePools, @isFavorite, @type, @parameters, @createdAt, @updatedAt)`,
       )
       .run(row);
     return rowToPrompt(row);
@@ -154,6 +164,7 @@ export class PromptRepository {
       description: input.description ?? existing.description,
       category: input.category ?? existing.category,
       tags: input.tags ?? existing.tags,
+      variablePools: input.variablePools ?? existing.variablePools,
       isFavorite: input.isFavorite ?? existing.isFavorite,
       type: input.type ?? existing.type,
       parameters: input.parameters ?? existing.parameters,
@@ -173,6 +184,7 @@ export class PromptRepository {
             category = @category,
             tags = @tags,
             variables = @variables,
+            variablePools = @variablePools,
             isFavorite = @isFavorite,
             type = @type,
             parameters = @parameters,

@@ -6,11 +6,16 @@ import { randomUUID } from 'node:crypto';
 import type { PromptRepository } from '../db/prompts.js';
 import type { AssetRepository } from '../db/assets.js';
 import type { AssetKind } from '@prompt-forge/shared';
-import { renderTemplate } from '@prompt-forge/shared';
+import {
+  clampBatchCount,
+  renderTemplate,
+  renderTemplateBatch,
+} from '@prompt-forge/shared';
 import { parsePromptInput } from '../validation.js';
 import { storagePathToFs } from '../uploads.js';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const MAX_RENDER_BATCH_BYTES = 2 * 1024 * 1024;
 
 function parsePositiveInt(value: unknown, fallback: number): number {
   const n = Number(value);
@@ -76,6 +81,8 @@ export function createPromptsRouter(
       promptId?: string;
       content?: string;
       values?: Record<string, string>;
+      variablePools?: Record<string, string[]>;
+      count?: number;
     };
 
     if (body?.promptId) {
@@ -89,6 +96,23 @@ export function createPromptsRouter(
         url: `/api/assets/${a.id}/file`,
         kind: a.kind,
       }));
+      const count = clampBatchCount(body.count);
+      if (
+        count > 1 &&
+        Object.keys(prompt.variablePools).length > 0
+      ) {
+        if (prompt.content.length * count > MAX_RENDER_BATCH_BYTES) {
+          res.status(400).json({
+            error: `batch render too large: ${count} x ${prompt.content.length} bytes exceeds ${MAX_RENDER_BATCH_BYTES}`,
+          });
+          return;
+        }
+        res.json({
+          rendered: renderTemplateBatch(prompt.content, prompt.variablePools, count),
+          assets,
+        });
+        return;
+      }
       res.json({
         rendered: renderTemplate(prompt.content, body.values ?? {}),
         assets,

@@ -21,6 +21,7 @@ export interface Prompt {
   category: string;
   tags: string[];
   variables: string[];
+  variablePools: Record<string, string[]>;
   isFavorite: boolean;
   type: PromptType;
   parameters: PromptParameters;
@@ -34,6 +35,7 @@ export interface PromptInput {
   description?: string;
   category?: string;
   tags?: string[];
+  variablePools?: Record<string, string[]>;
   isFavorite?: boolean;
   type?: PromptType;
   parameters?: PromptParameters;
@@ -111,6 +113,7 @@ export interface CreateConversationInput {
   providerId?: string;
   presetId?: string;
   extraSystemPrompt?: string;
+  enableSearch?: boolean;
 }
 
 export type SearchProvider = 'tavily' | 'exa' | 'duckduckgo' | 'none';

@@ -440,7 +440,22 @@ export default function WorkshopPage() {
   const [toolSearchQuery, setToolSearchQuery] = useState<string | null>(null);
   const [visionStatus, setVisionStatus] = useState<string | null>(null);
   const [searchEnabled, setSearchEnabled] = useState(false);
+  const [pendingPresetId, setPendingPresetId] = useState('tags');
+  const [pendingProviderId, setPendingProviderId] = useState<ProviderId>('cloud');
+  const pendingPresetIdRef = useRef(pendingPresetId);
+  const pendingProviderIdRef = useRef(pendingProviderId);
+  const searchEnabledRef = useRef(searchEnabled);
   const inputFileRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    pendingPresetIdRef.current = pendingPresetId;
+  }, [pendingPresetId]);
+  useEffect(() => {
+    pendingProviderIdRef.current = pendingProviderId;
+  }, [pendingProviderId]);
+  useEffect(() => {
+    searchEnabledRef.current = searchEnabled;
+  }, [searchEnabled]);
 
   const [reverseBusy, setReverseBusy] = useState(false);
   const reverseStopRef = useRef<AbortController | null>(null);
@@ -513,6 +528,7 @@ export default function WorkshopPage() {
         providerMap = (await api.getProviderSettings()).providers;
         if (cancelled) return;
         setProviders(providerMap);
+        setPendingProviderId(defaultProvider(providerMap));
       } catch (e) {
         if (!cancelled) {
           setBanner(e instanceof Error ? e.message : '加载 Provider 设置失败');
@@ -630,7 +646,10 @@ export default function WorkshopPage() {
   }
 
   async function handleProviderChange(providerId: ProviderId) {
-    if (!conversation) return;
+    if (!conversation) {
+      setPendingProviderId(providerId);
+      return;
+    }
     try {
       const updated = await api.updateConversation(conversation.id, { providerId });
       setConversation(updated);
@@ -640,7 +659,10 @@ export default function WorkshopPage() {
   }
 
   async function handlePresetChange(presetId: string) {
-    if (!conversation) return;
+    if (!conversation) {
+      setPendingPresetId(presetId);
+      return;
+    }
     try {
       const updated = await api.updateConversation(conversation.id, { presetId });
       setConversation(updated);
@@ -660,6 +682,8 @@ export default function WorkshopPage() {
     setToolSearchQuery(null);
     setImages([]);
     setInput('');
+    if (providers) setPendingProviderId(defaultProvider(providers));
+    setPendingPresetId('tags');
     refreshHistory();
   }
 
@@ -728,12 +752,20 @@ export default function WorkshopPage() {
     if (!conv) {
       if (!providers) return;
       try {
+        const sent = {
+          presetId: pendingPresetIdRef.current,
+          providerId: pendingProviderIdRef.current,
+          search: searchEnabledRef.current,
+        };
         conv = await api.createConversation({
           promptId: promptIdParam || undefined,
-          providerId: defaultProvider(providers),
+          providerId: sent.providerId,
+          presetId: sent.presetId,
+          enableSearch: sent.search,
           title: deriveTitle('反推提示词'),
           extraSystemPrompt: defaultExtraPromptRef.current || undefined,
         });
+        conv = await reconcilePending(conv, sent);
         setConversation(conv);
         setTitle(conv.title);
         setExtraPrompt(conv.extraSystemPrompt ?? '');
@@ -785,31 +817,42 @@ export default function WorkshopPage() {
     setReverseBusy(false);
   }
 
+  async function reconcilePending(
+    conv: Conversation,
+    sent: { presetId: string; providerId: ProviderId; search: boolean },
+  ): Promise<Conversation> {
+    const patch: {
+      presetId?: string;
+      providerId?: string;
+      enableSearch?: boolean;
+    } = {};
+    if (pendingPresetIdRef.current !== sent.presetId) {
+      patch.presetId = pendingPresetIdRef.current;
+    }
+    if (pendingProviderIdRef.current !== sent.providerId) {
+      patch.providerId = pendingProviderIdRef.current;
+    }
+    if (searchEnabledRef.current !== sent.search) {
+      patch.enableSearch = searchEnabledRef.current;
+    }
+    if (Object.keys(patch).length === 0) return conv;
+    try {
+      return await api.updateConversation(conv.id, patch);
+    } catch {
+      // keep the created conversation when persisting a mid-flight change fails
+      return conv;
+    }
+  }
+
   async function handleSearchToggle() {
-    let conv = conversation;
-    if (!conv) {
-      if (!providers) return;
-      try {
-        conv = await api.createConversation({
-          promptId: promptIdParam || undefined,
-          providerId: defaultProvider(providers),
-          extraSystemPrompt: defaultExtraPromptRef.current || undefined,
-        });
-        setConversation(conv);
-        setTitle(conv.title);
-        setExtraPrompt(conv.extraSystemPrompt ?? '');
-        setSearchEnabled(conv.enableSearch ?? false);
-        setMessages([]);
-        await refreshHistory();
-      } catch (e) {
-        setBanner(e instanceof Error ? e.message : '创建会话失败');
-        return;
-      }
+    if (!conversation) {
+      setSearchEnabled((prev) => !prev);
+      return;
     }
     const next = !searchEnabled;
     setSearchEnabled(next);
     try {
-      const updated = await api.updateConversation(conv.id, {
+      const updated = await api.updateConversation(conversation.id, {
         enableSearch: next,
       });
       setConversation(updated);
@@ -827,12 +870,20 @@ export default function WorkshopPage() {
     if (!conv) {
       if (!providers) return;
       try {
+        const sent = {
+          presetId: pendingPresetIdRef.current,
+          providerId: pendingProviderIdRef.current,
+          search: searchEnabledRef.current,
+        };
         conv = await api.createConversation({
           promptId: promptIdParam || undefined,
-          providerId: defaultProvider(providers),
+          providerId: sent.providerId,
+          presetId: sent.presetId,
+          enableSearch: sent.search,
           title: deriveTitle(content),
           extraSystemPrompt: defaultExtraPromptRef.current || undefined,
         });
+        conv = await reconcilePending(conv, sent);
         setConversation(conv);
         setTitle(conv.title);
         setExtraPrompt(conv.extraSystemPrompt ?? '');
@@ -1040,7 +1091,7 @@ export default function WorkshopPage() {
         <label className={styles.setting}>
           <span>预设</span>
           <select
-            value={conversation?.presetId ?? 'tags'}
+            value={conversation?.presetId ?? pendingPresetId}
             onChange={(e) => handlePresetChange(e.target.value)}
           >
             {presets.map((p) => (
@@ -1060,7 +1111,7 @@ export default function WorkshopPage() {
         <label className={styles.setting}>
           <span>模型</span>
           <select
-            value={conversation?.providerId ?? 'cloud'}
+            value={conversation?.providerId ?? pendingProviderId}
             onChange={(e) => handleProviderChange(e.target.value as ProviderId)}
           >
             <option value="local">

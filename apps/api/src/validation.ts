@@ -1,4 +1,5 @@
 import type { PromptInput, PromptType } from '@prompt-forge/shared';
+import { normalizeVariablePools } from '@prompt-forge/shared';
 
 const PROMPT_TYPES: PromptType[] = ['text', 'multimodal'];
 
@@ -35,6 +36,7 @@ export function parsePromptInput(body: unknown): PromptInputResult {
       tags: Array.isArray(b.tags)
         ? b.tags.filter((t): t is string => typeof t === 'string')
         : undefined,
+      variablePools: normalizeVariablePools(b.variablePools),
       isFavorite:
         typeof b.isFavorite === 'boolean' ? b.isFavorite : undefined,
       type,

@@ -253,6 +253,37 @@ textarea {
   color: var(--text);
 }
 
+.poolSection {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.poolBody {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.poolHint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 4px;
+}
+
+.poolField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.poolField span {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
 @media (max-width: 560px) {
   .row {
     grid-template-columns: 1fr;

@@ -287,6 +287,7 @@ export function createWorkshopRouter(
       providerId?: unknown;
       presetId?: unknown;
       extraSystemPrompt?: unknown;
+      enableSearch?: unknown;
     };
 
     const presets = mergedPresets();
@@ -326,6 +327,8 @@ export function createWorkshopRouter(
         providerId,
         presetId,
         extraSystemPrompt,
+        enableSearch:
+          typeof body.enableSearch === 'boolean' ? body.enableSearch : undefined,
       });
     } catch {
       res.status(400).json({ error: 'promptId does not exist' });

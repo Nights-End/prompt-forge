@@ -53,6 +53,7 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
   }
 
   const [paramOpen, setParamOpen] = useState(false);
+  const [poolOpen, setPoolOpen] = useState(false);
 
   const FIXED_PARAM_KEYS = [
     'model', 'steps', 'sampler', 'cfg', 'seed',
@@ -282,9 +283,46 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
       </div>
 
       {variables.length > 0 && (
-        <div className={styles.hint}>
-          检测到变量：{variables.map((v) => `{${v}}`).join(', ')}
-        </div>
+        <>
+          <div className={styles.hint}>
+            检测到变量：{variables.map((v) => `{${v}}`).join(', ')}
+          </div>
+          <div className={styles.poolSection}>
+            <button
+              type="button"
+              className={styles.paramToggle}
+              onClick={() => setPoolOpen((o) => !o)}
+            >
+              {poolOpen ? '收起变量池配置' : '变量池配置（可选）▸'}
+            </button>
+            {poolOpen && (
+              <div className={styles.poolBody}>
+                <p className={styles.poolHint}>
+                  为变量设置多个候选值（逗号分隔），渲染时随机抽取。至少 2 个值。
+                </p>
+                {variables.map((name) => (
+                  <label key={name} className={styles.poolField}>
+                    <span>{`{${name}}`}</span>
+                    <input
+                      type="text"
+                      value={form.variablePools[name] ?? ''}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          variablePools: {
+                            ...f.variablePools,
+                            [name]: e.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="值1, 值2, 值3"
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       <label className={styles.check}>

@@ -68,7 +68,7 @@ export class ConversationRepository {
       providerId: input.providerId ?? 'cloud',
       presetId: input.presetId ?? 'tags',
       extraSystemPrompt: input.extraSystemPrompt ?? '',
-      enableSearch: 0,
+      enableSearch: input.enableSearch ? 1 : 0,
       createdAt: now,
       updatedAt: now,
     };

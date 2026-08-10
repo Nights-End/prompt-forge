@@ -97,6 +97,10 @@ const MIGRATIONS: string[] = [
   `
     ALTER TABLE prompts ADD COLUMN parameters TEXT NOT NULL DEFAULT '{}';
   `,
+  // v7: variable pools for batch rendering
+  `
+    ALTER TABLE prompts ADD COLUMN variablePools TEXT NOT NULL DEFAULT '{}';
+  `,
 ];
 
 function migrate(db: Database.Database): void {

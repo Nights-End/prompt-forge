@@ -8,6 +8,10 @@ import { FormState, formToInput } from '../types';
 import styles from './DetailPage.module.css';
 
 function promptToForm(p: Prompt): FormState {
+  const poolStrings: Record<string, string> = {};
+  for (const [name, values] of Object.entries(p.variablePools ?? {})) {
+    poolStrings[name] = values.join(', ');
+  }
   return {
     title: p.title,
     content: p.content,
@@ -17,6 +21,7 @@ function promptToForm(p: Prompt): FormState {
     isFavorite: p.isFavorite,
     type: p.type,
     parameters: p.parameters ?? {},
+    variablePools: poolStrings,
     files: [],
   };
 }
@@ -58,6 +63,11 @@ export default function DetailPage() {
 
   const [values, setValues] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchCount, setBatchCount] = useState(10);
+  const [batchResults, setBatchResults] = useState<string[]>([]);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchError, setBatchError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,6 +117,19 @@ export default function DetailPage() {
     await navigator.clipboard.writeText(rendered);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function handleBatchRender() {
+    setBatchLoading(true);
+    setBatchError('');
+    try {
+      const result = await api.renderPromptBatch(id, batchCount);
+      setBatchResults(Array.isArray(result.rendered) ? result.rendered : [result.rendered]);
+    } catch (e) {
+      setBatchError(e instanceof Error ? e.message : '批量渲染失败');
+    } finally {
+      setBatchLoading(false);
+    }
   }
 
   if (loading) return <div className={styles.state}>加载中…</div>;
@@ -207,29 +230,85 @@ export default function DetailPage() {
       {prompt.variables.length > 0 && (
         <section className={styles.renderSection}>
           <h2 className={styles.sectionTitle}>渲染</h2>
-          <div className={styles.vars}>
-            {prompt.variables.map((name) => (
-              <label key={name} className={styles.varField}>
-                <span>{name}</span>
-                <input
-                  type="text"
-                  value={values[name] ?? ''}
-                  placeholder={`{${name}} 的值`}
-                  onChange={(e) =>
-                    setValues((v) => ({ ...v, [name]: e.target.value }))
-                  }
-                />
-              </label>
-            ))}
-          </div>
+          {Object.keys(prompt.variablePools).length > 0 && (
+            <label className={styles.batchToggle}>
+              <input
+                type="checkbox"
+                checked={batchMode}
+                onChange={(e) => setBatchMode(e.target.checked)}
+              />
+              批量随机模式
+            </label>
+          )}
 
-          <div className={styles.output}>
-            <div className={styles.outputHead}>
-              <span>Result</span>
-              <button onClick={handleCopy}>{copied ? '已复制 ✓' : '复制'}</button>
+          {!batchMode ? (
+            <>
+              <div className={styles.vars}>
+                {prompt.variables.map((name) => (
+                  <label key={name} className={styles.varField}>
+                    <span>{name}</span>
+                    <input
+                      type="text"
+                      value={values[name] ?? ''}
+                      placeholder={`{${name}} 的值`}
+                      onChange={(e) =>
+                        setValues((v) => ({ ...v, [name]: e.target.value }))
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+
+              <div className={styles.output}>
+                <div className={styles.outputHead}>
+                  <span>Result</span>
+                  <button onClick={handleCopy}>{copied ? '已复制 ✓' : '复制'}</button>
+                </div>
+                <pre className={styles.rendered}>{rendered}</pre>
+              </div>
+            </>
+          ) : (
+            <div className={styles.batchSection}>
+              <div className={styles.batchControls}>
+                <label>
+                  生成数量：
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={batchCount}
+                    onChange={(e) => setBatchCount(parseInt(e.target.value) || 10)}
+                  />
+                </label>
+                <button onClick={handleBatchRender} disabled={batchLoading}>
+                  {batchLoading ? '生成中…' : '批量渲染'}
+                </button>
+              </div>
+              {batchError && <div className={styles.batchError}>{batchError}</div>}
+              {batchResults.length > 0 && (
+                <div className={styles.batchOutput}>
+                  <div className={styles.outputHead}>
+                    <span>共 {batchResults.length} 条变体</span>
+                  </div>
+                  <ul className={styles.batchList}>
+                    {batchResults.map((text, i) => (
+                      <li key={i} className={styles.batchItem}>
+                        <span className={styles.batchIndex}>#{i + 1}</span>
+                        <pre className={styles.batchText}>{text}</pre>
+                        <button
+                          onClick={async () => {
+                            await navigator.clipboard.writeText(text);
+                          }}
+                        >
+                          复制
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
-            <pre className={styles.rendered}>{rendered}</pre>
-          </div>
+          )}
         </section>
       )}
     </div>

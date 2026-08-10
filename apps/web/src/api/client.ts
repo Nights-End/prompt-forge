@@ -70,6 +70,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ promptId, values }),
     }),
+  renderPromptBatch: (promptId: string, count: number) =>
+    request<{ rendered: string[] | string; assets: { id: string; url: string; kind: string }[] }>(
+      '/prompts/render',
+      { method: 'POST', body: JSON.stringify({ promptId, count }) },
+    ),
   listAssets: (promptId: string) =>
     request<Asset[]>(`/prompts/${promptId}/assets`),
   listAssetsByPrompts: (promptIds: string[]) =>

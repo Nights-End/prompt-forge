@@ -112,6 +112,55 @@ test('update + getById', async () => {
   expect(got.data.title).toBe('Draft v2');
 });
 
+test('update preserves variable pools when omitted', async () => {
+  const created = await json('POST', '/api/prompts', {
+    title: 'Pooled',
+    content: 'Pick {style} in {scene}.',
+    variablePools: {
+      style: ['cyberpunk', 'steampunk', 'minimal'],
+      scene: ['city night', 'desert noon'],
+    },
+  });
+  expect(created.status).toBe(201);
+  expect(created.data.variablePools.style).toEqual(['cyberpunk', 'steampunk', 'minimal']);
+
+  const updated = await json('PUT', `/api/prompts/${created.data.id}`, {
+    title: 'Pooled v2',
+    content: 'Pick {style} in {scene}.',
+  });
+  expect(updated.status).toBe(200);
+  expect(updated.data.variablePools.style).toEqual(['cyberpunk', 'steampunk', 'minimal']);
+  expect(updated.data.variablePools.scene).toEqual(['city night', 'desert noon']);
+});
+
+test('batch render clamps count and caps total bytes', async () => {
+  const created = await json('POST', '/api/prompts', {
+    title: 'Batch',
+    content: 'Pick {style}.',
+    variablePools: { style: ['a', 'b'] },
+  });
+  const id = created.data.id;
+
+  const batch = await json('POST', '/api/prompts/render', { promptId: id, count: 3 });
+  expect(batch.status).toBe(200);
+  expect(batch.data.rendered).toHaveLength(3);
+
+  const clamped = await json('POST', '/api/prompts/render', { promptId: id, count: 9999 });
+  expect(clamped.status).toBe(200);
+  expect(clamped.data.rendered).toHaveLength(100);
+
+  const big = await json('POST', '/api/prompts', {
+    title: 'Big',
+    content: `Pick {style}. ${'x'.repeat(30_000)}`,
+    variablePools: { style: ['a', 'b'] },
+  });
+  const capped = await json('POST', '/api/prompts/render', {
+    promptId: big.data.id,
+    count: 100,
+  });
+  expect(capped.status).toBe(400);
+});
+
 test('search by query', async () => {
   await json('POST', '/api/prompts', {
     title: 'UniqueMarketingPhrase',
@@ -163,4 +212,111 @@ test('delete', async () => {
 
   const missing = await json('GET', `/api/prompts/${id}`);
   expect(missing.status).toBe(404);
+});
+
+test('create prompt with variablePools', async () => {
+  const { status, data } = await json('POST', '/api/prompts', {
+    title: 'Pool Test',
+    content: 'A {subject} in {style}',
+    variablePools: {
+      subject: ['cat', 'dog', 'fox'],
+      style: ['watercolor', 'oil painting', 'pixel art'],
+    },
+  });
+  expect(status).toBe(201);
+  expect(data.variablePools).toEqual({
+    subject: ['cat', 'dog', 'fox'],
+    style: ['watercolor', 'oil painting', 'pixel art'],
+  });
+
+  const got = await json('GET', `/api/prompts/${data.id}`);
+  expect(got.data.variablePools).toEqual({
+    subject: ['cat', 'dog', 'fox'],
+    style: ['watercolor', 'oil painting', 'pixel art'],
+  });
+});
+
+test('render batch with variablePools', async () => {
+  const created = await json('POST', '/api/prompts', {
+    title: 'Batch Render',
+    content: 'A {subject} in {style} style',
+    variablePools: {
+      subject: ['cat', 'dog'],
+      style: ['watercolor', 'oil painting'],
+    },
+  });
+
+  const { status, data } = await json('POST', '/api/prompts/render', {
+    promptId: created.data.id,
+    count: 5,
+  });
+  expect(status).toBe(200);
+  expect(Array.isArray(data.rendered)).toBe(true);
+  expect(data.rendered.length).toBe(5);
+  for (const text of data.rendered) {
+    expect(typeof text).toBe('string');
+    expect(text).not.toContain('{subject}');
+    expect(text).not.toContain('{style}');
+  }
+});
+
+test('render batch without pools returns single string', async () => {
+  const created = await json('POST', '/api/prompts', {
+    title: 'No Pool',
+    content: 'Hello {name}',
+  });
+
+  const { status, data } = await json('POST', '/api/prompts/render', {
+    promptId: created.data.id,
+    count: 10,
+  });
+  expect(status).toBe(200);
+  expect(typeof data.rendered).toBe('string');
+  expect(data.rendered).toContain('{name}');
+});
+
+test('render batch with insufficient pool entries filtered', async () => {
+  const created = await json('POST', '/api/prompts', {
+    title: 'Filtered Pool',
+    content: 'A {subject} in {style}',
+    variablePools: {
+      subject: ['cat'],
+      style: ['watercolor', 'oil painting'],
+    },
+  });
+  expect(created.data.variablePools).toEqual({
+    style: ['watercolor', 'oil painting'],
+  });
+});
+
+test('export json + import roundtrip preserves variablePools', async () => {
+  await json('POST', '/api/prompts', {
+    title: 'Pool Export',
+    content: 'A {mood} landscape',
+    variablePools: { mood: ['serene', 'stormy', 'misty'] },
+  });
+
+  const exported = await json('GET', '/api/export?format=json');
+  const poolPrompt = exported.data.prompts.find((p: { title: string }) => p.title === 'Pool Export');
+  expect(poolPrompt).toBeTruthy();
+  expect(poolPrompt.variablePools).toEqual({ mood: ['serene', 'stormy', 'misty'] });
+
+  const { status, data } = await json('POST', '/api/import', {
+    prompts: [
+      {
+        title: 'Reimported Pool',
+        content: 'A {color} {shape}',
+        variablePools: { color: ['red', 'blue'], shape: ['circle', 'square'] },
+      },
+    ],
+  });
+  expect(status).toBe(201);
+  expect(data.imported).toBe(1);
+
+  const list = await json('GET', '/api/prompts?q=Reimported+Pool');
+  expect(list.data.length).toBe(1);
+  expect(list.data[0].variablePools).toEqual({
+    color: ['red', 'blue'],
+    shape: ['circle', 'square'],
+  });
 });

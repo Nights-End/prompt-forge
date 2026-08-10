@@ -1,4 +1,5 @@
 import { PromptInput, PromptParameters, PromptType } from '@prompt-forge/shared';
+import { normalizeVariablePools } from '@prompt-forge/shared';
 
 export interface FormState {
   title: string;
@@ -9,6 +10,7 @@ export interface FormState {
   isFavorite: boolean;
   type: PromptType;
   parameters: PromptParameters;
+  variablePools: Record<string, string>;
   files: File[];
 }
 
@@ -21,10 +23,18 @@ export const EMPTY_FORM: FormState = {
   isFavorite: false,
   type: 'text',
   parameters: {},
+  variablePools: {},
   files: [],
 };
 
 export function formToInput(form: FormState): PromptInput {
+  const pools: Record<string, unknown> = {};
+  for (const [name, raw] of Object.entries(form.variablePools)) {
+    pools[name] = raw
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+  }
   return {
     title: form.title,
     content: form.content,
@@ -34,6 +44,7 @@ export function formToInput(form: FormState): PromptInput {
       .split(',')
       .map((t) => t.trim())
       .filter(Boolean),
+    variablePools: normalizeVariablePools(pools),
     isFavorite: form.isFavorite,
     type: form.type,
     parameters: form.parameters,
