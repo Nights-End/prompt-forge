@@ -89,7 +89,11 @@ const MIGRATIONS: string[] = [
 
     ALTER TABLE conversation_messages ADD COLUMN multimodal_content TEXT;
   `,
-  // v5: prompt generation parameters
+  // v5: default prompt flag
+  `
+    ALTER TABLE prompts ADD COLUMN isDefault INTEGER NOT NULL DEFAULT 0;
+  `,
+  // v6: prompt generation parameters
   `
     ALTER TABLE prompts ADD COLUMN parameters TEXT NOT NULL DEFAULT '{}';
   `,
