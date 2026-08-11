@@ -320,3 +320,121 @@ test('export json + import roundtrip preserves variablePools', async () => {
     shape: ['circle', 'square'],
   });
 });
+
+test('meta tags aggregates unique tags across prompts', async () => {
+  await json('POST', '/api/prompts', {
+    title: 'Tagged A',
+    content: 'x',
+    tags: ['cyberpunk', 'neon', 'night'],
+  });
+  await json('POST', '/api/prompts', {
+    title: 'Tagged B',
+    content: 'y',
+    tags: ['cyberpunk', 'steampunk'],
+  });
+
+  const { status, data } = await json<string[]>('GET', '/api/meta/tags');
+  expect(status).toBe(200);
+  const set = new Set(data);
+  expect(set.has('cyberpunk')).toBe(true);
+  expect(set.has('neon')).toBe(true);
+  expect(set.has('steampunk')).toBe(true);
+  expect(data).toHaveLength(set.size);
+});
+
+test('generate-tags rejects prompts without images', async () => {
+  const created = await json('POST', '/api/prompts', { title: 'NoImg', content: 'x' });
+  const { status, data } = await json('POST', `/api/prompts/${created.data.id}/generate-tags`);
+  expect(status).toBe(400);
+  expect(data.error).toContain('no image assets');
+});
+
+test('templatize rejects without configured provider', async () => {
+  fs.writeFileSync(
+    path.join(tmpDir, 'provider.json'),
+    JSON.stringify({
+      cloud: { kind: 'openai-compatible', baseUrl: '', model: '' },
+      local: { kind: 'ollama', baseUrl: '', model: '' },
+    }),
+  );
+  const created = await json('POST', '/api/prompts', { title: 'Tpl', content: 'a cat in rain' });
+  const { status, data } = await json('POST', `/api/prompts/${created.data.id}/templatize`);
+  expect(status).toBe(400);
+  expect(data.error).toContain('no LLM provider');
+});
+
+test('templatize rejects oversized content', async () => {
+  const created = await json('POST', '/api/prompts', {
+    title: 'Long',
+    content: 'x'.repeat(9000),
+  });
+  const { status, data } = await json('POST', `/api/prompts/${created.data.id}/templatize`);
+  expect(status).toBe(400);
+  expect(data.error).toContain('must be at most');
+});
+
+test('templatize parses model output into template + variables', async () => {
+  fs.writeFileSync(
+    path.join(tmpDir, 'provider.json'),
+    JSON.stringify({
+      cloud: {
+        kind: 'openai-compatible',
+        baseUrl: 'http://mock-llm',
+        model: 'mock-model',
+        apiKey: 'mock-key',
+      },
+      local: { kind: 'ollama', baseUrl: '', model: '' },
+    }),
+  );
+  const mockFetch = (async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content:
+                '```json\n{"template": "a {风格} of {主体} in {场景}", ' +
+                '"variables": [' +
+                '{"name": "风格", "values": ["cyberpunk", "steampunk", "minimal"]}, ' +
+                '{"name": "主体", "values": ["cat", "wolf", "fox"]}, ' +
+                '{"name": "场景", "values": ["neon rain", "desert noon", "snow night"]}' +
+                ']}\n```',
+            },
+          },
+        ],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )) as unknown as typeof fetch;
+
+  const app = createApp({ fetchImpl: mockFetch });
+  const server2 = app.listen(0);
+  await new Promise((resolve) => server2.once('listening', resolve));
+  const addr2 = server2.address() as AddressInfo;
+  const base2 = `http://127.0.0.1:${addr2.port}`;
+
+  try {
+    const created = await (async () => {
+      const res = await fetch(`${base2}/api/prompts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Tpl2', content: 'a cyberpunk cat in neon rain' }),
+      });
+      return (await res.json()) as { id: string };
+    })();
+
+    const res = await fetch(`${base2}/api/prompts/${created.id}/templatize`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as {
+      template: string;
+      variables: { name: string; values: string[] }[];
+    };
+    expect(data.template).toContain('{风格}');
+    expect(data.variables.length).toBe(3);
+    expect(data.variables[0].values[0]).toBe('cyberpunk');
+  } finally {
+    server2.close();
+    (app.locals.db as { close: () => void }).close();
+  }
+});

@@ -27,6 +27,10 @@ export function createMetaRouter(repo: PromptRepository): Router {
     res.json(repo.categories());
   });
 
+  router.get('/tags', (_req, res) => {
+    res.json(repo.tags());
+  });
+
   return router;
 }
 

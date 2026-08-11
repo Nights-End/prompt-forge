@@ -12,7 +12,7 @@ import { createWorkshopRouter } from './routes/workshop.js';
 import { loadWorkshopConfig } from './workshop/config.js';
 import { resolveUploadsDir } from './uploads.js';
 
-export function createApp() {
+export function createApp(deps: { fetchImpl?: typeof fetch } = {}) {
   const app = express();
   const db = createDb();
   const repo = new PromptRepository(db);
@@ -29,7 +29,7 @@ export function createApp() {
     res.json({ status: 'ok', time: new Date().toISOString() });
   });
 
-  app.use('/api/prompts', createPromptsRouter(repo, assetRepo, uploadsDir));
+  app.use('/api/prompts', createPromptsRouter(repo, assetRepo, uploadsDir, deps));
   app.use('/api/meta', createMetaRouter(repo));
   app.use('/api/export', createExportRouter(repo, assetRepo, uploadsDir));
   app.use('/api/import', createImportRouter(repo, assetRepo, uploadsDir));

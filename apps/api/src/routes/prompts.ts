@@ -13,9 +13,23 @@ import {
 } from '@prompt-forge/shared';
 import { parsePromptInput } from '../validation.js';
 import { storagePathToFs } from '../uploads.js';
+import { pickProviderId } from './llm.js';
+import { resolveProviderConfigPath } from '../llm/config.js';
+import {
+  resolveUpstream,
+  resolveVisionUpstream,
+  tagImages,
+  templatizePrompt,
+} from '../llm/provider.js';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_RENDER_BATCH_BYTES = 2 * 1024 * 1024;
+const TAG_IMAGE_LIMIT = 5;
+const TAG_VISION_TIMEOUT_MS = 300_000;
+const TEMPLATIZE_TIMEOUT_MS = 120_000;
+const TAG_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+const TAG_TOTAL_MAX_BYTES = 4 * 1024 * 1024;
+const TEMPLATIZE_CONTENT_MAX_CHARS = 8000;
 
 function parsePositiveInt(value: unknown, fallback: number): number {
   const n = Number(value);
@@ -32,8 +46,10 @@ export function createPromptsRouter(
   repo: PromptRepository,
   assetRepo: AssetRepository,
   uploadsDir: string,
+  deps: { fetchImpl?: typeof fetch } = {},
 ): Router {
   const router = Router();
+  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const tmpDir = path.join(uploadsDir, '.tmp');
   fs.mkdirSync(tmpDir, { recursive: true });
   const upload = multer({
@@ -195,6 +211,134 @@ export function createPromptsRouter(
       );
     }
     res.status(201).json(created);
+  });
+
+  router.post('/:id/generate-tags', async (req, res) => {
+    const prompt = repo.getById(req.params.id);
+    if (!prompt) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+
+    const imageAssets = assetRepo
+      .listByPrompt(prompt.id)
+      .filter((a) => a.kind === 'image');
+    if (imageAssets.length === 0) {
+      res.status(400).json({ error: 'no image assets to analyze' });
+      return;
+    }
+
+    const vision = resolveVisionUpstream();
+    if (!vision.ok) {
+      res.status(400).json({ error: vision.error });
+      return;
+    }
+
+    const urls: string[] = [];
+    let totalBytes = 0;
+    for (const asset of imageAssets.slice(0, TAG_IMAGE_LIMIT)) {
+      const filePath = storagePathToFs(uploadsDir, asset.storagePath);
+      if (!fs.existsSync(filePath)) continue;
+      const stat = fs.statSync(filePath);
+      if (stat.size > TAG_IMAGE_MAX_BYTES) continue;
+      if (totalBytes + stat.size > TAG_TOTAL_MAX_BYTES) continue;
+      totalBytes += stat.size;
+      const mime =
+        (asset.metadata?.mimeType as string | undefined) ?? 'image/jpeg';
+      urls.push(`data:${mime};base64,${fs.readFileSync(filePath).toString('base64')}`);
+    }
+    if (urls.length === 0) {
+      res.status(400).json({
+        error: `no usable image assets (each image must be ≤${Math.round(TAG_IMAGE_MAX_BYTES / 1024 / 1024)}MB, total ≤${Math.round(TAG_TOTAL_MAX_BYTES / 1024 / 1024)}MB)`,
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TAG_VISION_TIMEOUT_MS);
+    try {
+      const result = await tagImages(fetchImpl, vision.value, urls, controller.signal);
+      if (!result.ok) {
+        res.status(502).json({ error: result.error });
+        return;
+      }
+
+      const existing = new Set(prompt.tags.map((t) => t.trim()).filter(Boolean));
+      const merged = [...new Set([...existing, ...result.tags])];
+      repo.update(req.params.id, { tags: merged });
+      res.json({ tags: merged, added: merged.length - existing.size });
+    } catch (e) {
+      const aborted = e instanceof Error && e.name === 'AbortError';
+      res.status(aborted ? 504 : 502).json({
+        error: aborted
+          ? 'vision request timed out'
+          : e instanceof Error
+            ? e.message
+            : 'vision request failed',
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
+  router.post('/:id/templatize', async (req, res) => {
+    const prompt = repo.getById(req.params.id);
+    if (!prompt) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    if (prompt.content.length > TEMPLATIZE_CONTENT_MAX_CHARS) {
+      res.status(400).json({
+        error: `prompt content must be at most ${TEMPLATIZE_CONTENT_MAX_CHARS} characters to be templatized`,
+      });
+      return;
+    }
+
+    if (!fs.existsSync(resolveProviderConfigPath())) {
+      res.status(400).json({
+        error: 'no LLM provider configured (set baseUrl and api key in settings)',
+      });
+      return;
+    }
+    const providerId = pickProviderId();
+    if (!providerId) {
+      res.status(400).json({
+        error: 'no LLM provider configured (set baseUrl and api key in settings)',
+      });
+      return;
+    }
+    const upstream = resolveUpstream(providerId);
+    if (!upstream.ok) {
+      res.status(400).json({ error: upstream.error });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TEMPLATIZE_TIMEOUT_MS);
+    try {
+      const result = await templatizePrompt(
+        fetchImpl,
+        upstream.value,
+        prompt.content,
+        controller.signal,
+      );
+      if (!result.ok) {
+        res.status(502).json({ error: result.error });
+        return;
+      }
+      res.json({ template: result.template, variables: result.variables });
+    } catch (e) {
+      const aborted = e instanceof Error && e.name === 'AbortError';
+      res.status(aborted ? 504 : 502).json({
+        error: aborted
+          ? 'upstream request timed out'
+          : e instanceof Error
+            ? e.message
+            : 'upstream request failed',
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   });
 
   router.get('/:id/assets', (req, res) => {

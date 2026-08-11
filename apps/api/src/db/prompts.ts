@@ -88,6 +88,8 @@ export interface ListOptions {
 export class PromptRepository {
   constructor(private db: Database.Database) {}
 
+  private tagsCache: string[] | null = null;
+
   private map(rows: PromptRow[]): Prompt[] {
     return rows.map(rowToPrompt);
   }
@@ -151,10 +153,11 @@ export class PromptRepository {
             (@id, @title, @content, @description, @category, @tags, @variables, @variablePools, @isFavorite, @type, @parameters, @createdAt, @updatedAt)`,
       )
       .run(row);
+    this.invalidateTagsCache();
     return rowToPrompt(row);
   }
 
-  update(id: string, input: PromptInput): Prompt | null {
+  update(id: string, input: Partial<PromptInput>): Prompt | null {
     const existing = this.getById(id);
     if (!existing) return null;
 
@@ -192,11 +195,13 @@ export class PromptRepository {
           WHERE id = @id`,
       )
       .run(row);
+    this.invalidateTagsCache();
     return rowToPrompt(row);
   }
 
   delete(id: string): boolean {
     const result = this.db.prepare('DELETE FROM prompts WHERE id = ?').run(id);
+    if (result.changes > 0) this.invalidateTagsCache();
     return result.changes > 0;
   }
 
@@ -205,5 +210,30 @@ export class PromptRepository {
       .prepare('SELECT DISTINCT category FROM prompts ORDER BY category ASC')
       .all() as { category: string }[];
     return rows.map((r) => r.category);
+  }
+
+  tags(): string[] {
+    if (this.tagsCache) return this.tagsCache;
+    const rows = this.db
+      .prepare("SELECT DISTINCT tags FROM prompts WHERE tags != '[]'")
+      .all() as { tags: string }[];
+    const set = new Set<string>();
+    for (const row of rows) {
+      try {
+        const parsed = JSON.parse(row.tags) as unknown;
+        if (!Array.isArray(parsed)) continue;
+        for (const t of parsed) {
+          if (typeof t === 'string' && t.trim()) set.add(t.trim());
+        }
+      } catch {
+        // skip malformed tag rows
+      }
+    }
+    this.tagsCache = [...set].sort((a, b) => a.localeCompare(b, 'zh'));
+    return this.tagsCache;
+  }
+
+  private invalidateTagsCache(): void {
+    this.tagsCache = null;
   }
 }

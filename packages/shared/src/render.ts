@@ -1,4 +1,4 @@
-const VARIABLE_REGEX = /\{([a-zA-Z0-9_]+)\}/g;
+const VARIABLE_REGEX = /\{([\p{L}\p{N}_]+)\}/gu;
 
 export const BATCH_COUNT_MIN = 1;
 export const BATCH_COUNT_MAX = 100;

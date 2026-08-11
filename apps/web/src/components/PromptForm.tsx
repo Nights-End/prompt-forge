@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { EMPTY_FORM, FormState } from '../types';
 import { extractVariables } from '@prompt-forge/shared';
 import { api } from '../api/client';
@@ -54,6 +54,49 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
 
   const [paramOpen, setParamOpen] = useState(false);
   const [poolOpen, setPoolOpen] = useState(false);
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [focusedPoolVar, setFocusedPoolVar] = useState<string | null>(null);
+  const poolSectionRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listTags()
+      .then((tags) => {
+        if (!cancelled) setAllTags(tags);
+      })
+      .catch(() => {
+        // tag library is best-effort; the pool still works without it
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function handlePoolBlur(e: React.FocusEvent) {
+    const next = e.relatedTarget as Node | null;
+    if (poolSectionRef.current && next && poolSectionRef.current.contains(next)) {
+      return;
+    }
+    setFocusedPoolVar(null);
+  }
+
+  function appendTagToPool(name: string, tag: string) {
+    setForm((f) => {
+      const current = (f.variablePools[name] ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (current.includes(tag)) return f;
+      return {
+        ...f,
+        variablePools: {
+          ...f.variablePools,
+          [name]: [...current, tag].join(', '),
+        },
+      };
+    });
+  }
 
   const FIXED_PARAM_KEYS = [
     'model', 'steps', 'sampler', 'cfg', 'seed',
@@ -296,7 +339,7 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
               {poolOpen ? '收起变量池配置' : '变量池配置（可选）▸'}
             </button>
             {poolOpen && (
-              <div className={styles.poolBody}>
+              <div className={styles.poolBody} ref={poolSectionRef}>
                 <p className={styles.poolHint}>
                   为变量设置多个候选值（逗号分隔），渲染时随机抽取。至少 2 个值。
                 </p>
@@ -315,10 +358,44 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
                           },
                         }))
                       }
+                      onFocus={() => setFocusedPoolVar(name)}
+                      onBlur={handlePoolBlur}
                       placeholder="值1, 值2, 值3"
                     />
                   </label>
                 ))}
+                {focusedPoolVar && allTags.length > 0 && (
+                  <div className={styles.tagPanel}>
+                    <div className={styles.tagPanelTitle}>
+                      标签库 — 点击标签添加到「{focusedPoolVar}」
+                    </div>
+                    <div className={styles.tagChips}>
+                      {allTags.map((tag) => {
+                        const inPool = (form.variablePools[focusedPoolVar] ?? '')
+                          .split(',')
+                          .map((s) => s.trim())
+                          .filter(Boolean)
+                          .includes(tag);
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            className={
+                              inPool
+                                ? `${styles.tagChip} ${styles.tagChipUsed}`
+                                : styles.tagChip
+                            }
+                            title={inPool ? '已在池中' : `添加到 ${focusedPoolVar}`}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => appendTagToPool(focusedPoolVar, tag)}
+                          >
+                            {tag}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -65,6 +65,17 @@ export const api = {
   deletePrompt: (id: string) =>
     request<void>(`/prompts/${id}`, { method: 'DELETE' }),
   getCategories: () => request<string[]>('/meta/categories'),
+  listTags: () => request<string[]>('/meta/tags'),
+  generatePromptTags: (id: string) =>
+    request<{ tags: string[]; added: number }>(
+      `/prompts/${encodeURIComponent(id)}/generate-tags`,
+      { method: 'POST' },
+    ),
+  templatizePrompt: (id: string) =>
+    request<{ template: string; variables: { name: string; values: string[] }[] }>(
+      `/prompts/${encodeURIComponent(id)}/templatize`,
+      { method: 'POST' },
+    ),
   renderPrompt: (promptId: string, values: Record<string, string>) =>
     request<RenderResult>('/prompts/render', {
       method: 'POST',

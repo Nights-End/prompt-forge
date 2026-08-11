@@ -284,6 +284,49 @@ textarea {
   font-family: var(--font-mono);
 }
 
+.tagPanel {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  background: var(--panel-2);
+}
+
+.tagPanelTitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.tagChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tagChip {
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.tagChip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-2);
+}
+
+.tagChip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.tagChipUsed {
+  border-style: dashed;
+}
+
 @media (max-width: 560px) {
   .row {
     grid-template-columns: 1fr;

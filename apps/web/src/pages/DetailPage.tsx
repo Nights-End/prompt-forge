@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import { Asset, Prompt, renderTemplate } from '@prompt-forge/shared';
+import {
+  Asset,
+  Prompt,
+  extractVariables,
+  normalizeVariablePools,
+  renderTemplate,
+} from '@prompt-forge/shared';
 import PromptForm from '../components/PromptForm';
 import { SparklesIcon } from '../components/icons';
 import { FormState, formToInput } from '../types';
@@ -68,6 +74,14 @@ export default function DetailPage() {
   const [batchResults, setBatchResults] = useState<string[]>([]);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchError, setBatchError] = useState('');
+  const [taggingLoading, setTaggingLoading] = useState(false);
+  const [taggingError, setTaggingError] = useState('');
+  const [templatizing, setTemplatizing] = useState(false);
+  const [templateDraft, setTemplateDraft] = useState<{
+    template: string;
+    variables: { name: string; values: string[] }[];
+  } | null>(null);
+  const [templatizeError, setTemplatizeError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -132,6 +146,87 @@ export default function DetailPage() {
     }
   }
 
+  async function handleGenerateTags() {
+    setTaggingLoading(true);
+    setTaggingError('');
+    try {
+      await api.generatePromptTags(id);
+      await load();
+    } catch (e) {
+      setTaggingError(e instanceof Error ? e.message : '标签生成失败');
+    } finally {
+      setTaggingLoading(false);
+    }
+  }
+
+  async function handleTemplatize() {
+    setTemplatizing(true);
+    setTemplatizeError('');
+    try {
+      const result = await api.templatizePrompt(id);
+      setTemplateDraft({ template: result.template, variables: result.variables });
+    } catch (e) {
+      setTemplatizeError(e instanceof Error ? e.message : '转模板失败');
+    } finally {
+      setTemplatizing(false);
+    }
+  }
+
+  function handleTemplateVarChange(index: number, value: string) {
+    setTemplateDraft((d) =>
+      d
+        ? {
+            ...d,
+            variables: d.variables.map((v, i) =>
+              i === index
+                ? {
+                    ...v,
+                    values: value
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  }
+                : v,
+            ),
+          }
+        : d,
+    );
+  }
+
+  async function handleSaveTemplate() {
+    if (!templateDraft) return;
+    const pools: Record<string, string[]> = {};
+    for (const v of templateDraft.variables) pools[v.name] = v.values;
+    const normalized = normalizeVariablePools(pools) ?? {};
+    const placeholders = extractVariables(templateDraft.template);
+    const missing = placeholders.filter((name) => !normalized[name]);
+    if (missing.length > 0) {
+      setTemplatizeError(
+        `以下变量缺少有效候选值（每个变量至少 2 个）：${missing
+          .map((m) => `{${m}}`)
+          .join(', ')}`,
+      );
+      return;
+    }
+    if (Object.keys(normalized).length === 0) {
+      setTemplatizeError('至少需要一个变量池');
+      return;
+    }
+    try {
+      const created = await api.createPrompt({
+        title: `${prompt?.title || '模板'}（模板）`,
+        content: templateDraft.template,
+        category: prompt?.category,
+        tags: prompt?.tags,
+        variablePools: normalized,
+      });
+      setTemplateDraft(null);
+      navigate(`/prompts/${created.id}`);
+    } catch (e) {
+      setTemplatizeError(e instanceof Error ? e.message : '保存模板失败');
+    }
+  }
+
   if (loading) return <div className={styles.state}>加载中…</div>;
   if (error || !prompt)
     return (
@@ -172,12 +267,22 @@ export default function DetailPage() {
               AI 优化
             </span>
           </button>
+          <button
+            onClick={handleTemplatize}
+            disabled={templatizing}
+            title="用 AI 把内容转成带 {变量} 的模板，另存为新提示词"
+          >
+            {templatizing ? '转换中…' : '✨ AI 转模板'}
+          </button>
           <button onClick={() => setEditing(true)}>编辑</button>
           <button className={styles.danger} onClick={handleDelete}>
             删除
           </button>
         </div>
       </div>
+      {!templateDraft && templatizeError && (
+        <div className={styles.batchError}>{templatizeError}</div>
+      )}
 
       {prompt.description && <p className={styles.desc}>{prompt.description}</p>}
 
@@ -189,6 +294,17 @@ export default function DetailPage() {
             #{t}
           </span>
         ))}
+        {assets.some((a) => a.kind === 'image') && (
+          <button
+            className={styles.tagGenBtn}
+            onClick={handleGenerateTags}
+            disabled={taggingLoading}
+            title="用视觉模型分析图片并生成标签"
+          >
+            {taggingLoading ? '分析中…' : '🖼 AI 生成标签'}
+          </button>
+        )}
+        {taggingError && <div className={styles.batchError}>{taggingError}</div>}
       </div>
 
       {assets.length > 0 && (
@@ -310,6 +426,50 @@ export default function DetailPage() {
             </div>
           )}
         </section>
+      )}
+
+      {templateDraft && (
+        <div className={styles.modalOverlay} onClick={() => setTemplateDraft(null)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHead}>
+              <span>AI 转模板预览</span>
+              <button className={styles.modalClose} onClick={() => setTemplateDraft(null)}>
+                ✕
+              </button>
+            </div>
+            {templatizeError && <div className={styles.batchError}>{templatizeError}</div>}
+            <label className={styles.templateField}>
+              <span>模板内容</span>
+              <textarea
+                className={styles.templateTextarea}
+                rows={8}
+                value={templateDraft.template}
+                onChange={(e) =>
+                  setTemplateDraft((d) => d && { ...d, template: e.target.value })
+                }
+              />
+            </label>
+            <div className={styles.templateVars}>
+              {templateDraft.variables.map((v, i) => (
+                <label key={v.name} className={styles.templateVarRow}>
+                  <span className={styles.templateVarName}>{`{${v.name}}`}</span>
+                  <input
+                    type="text"
+                    value={v.values.join(', ')}
+                    onChange={(e) => handleTemplateVarChange(i, e.target.value)}
+                    placeholder="候选值，逗号分隔（≥2 个）"
+                  />
+                </label>
+              ))}
+            </div>
+            <div className={styles.modalActions}>
+              <button onClick={() => setTemplateDraft(null)}>取消</button>
+              <button className={styles.templateSaveBtn} onClick={handleSaveTemplate}>
+                另存为模板提示词
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
