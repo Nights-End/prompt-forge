@@ -344,6 +344,13 @@
   border: none;
 }
 
+.assetCardDragging {
+  opacity: 0.45;
+  border-color: var(--accent);
+  transform: scale(0.97);
+  transition: opacity 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
 .paramSection {
   margin-bottom: 14px;
 }

@@ -42,7 +42,7 @@ const MIGRATIONS: string[] = [
   `,
   // v2: prompt type + asset files
   `
-    ALTER TABLE prompts ADD COLUMN type TEXT NOT NULL DEFAULT 'text';
+    ALTER TABLE prompts ADD COLUMN type TEXT NOT NULL DEFAULT 'multimodal';
 
     CREATE TABLE IF NOT EXISTS assets (
       id          TEXT PRIMARY KEY,

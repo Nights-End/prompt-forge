@@ -49,6 +49,11 @@ export default function SettingsPage() {
   const [visionLoadingModels, setVisionLoadingModels] = useState(false);
   const [visionModelError, setVisionModelError] = useState('');
 
+  const [defaultCategory, setDefaultCategory] = useState('');
+  const [savingCategory, setSavingCategory] = useState(false);
+  const [savedCategory, setSavedCategory] = useState(false);
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -80,6 +85,11 @@ export default function SettingsPage() {
         apiKey: '',
       });
       setVisionSaved(false);
+
+      const prompts = await api.getPromptsSettings();
+      setDefaultCategory(prompts.defaultCategory);
+      setSavedCategory(false);
+      api.getCategories().then(setCategoryOptions).catch(() => {});
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载设置失败');
     } finally {
@@ -224,6 +234,27 @@ export default function SettingsPage() {
       setError(e instanceof Error ? e.message : '保存搜索设置失败');
     } finally {
       setSavingSearch(false);
+    }
+  }
+
+  async function handleSaveCategory() {
+    setSavingCategory(true);
+    setSavedCategory(false);
+    setError('');
+    try {
+      const trimmed = defaultCategory.trim();
+      if (trimmed.length > 50) {
+        throw new Error('默认分类最多 50 个字符');
+      }
+      const result = await api.savePromptsSettings({
+        defaultCategory: trimmed || undefined,
+      });
+      setDefaultCategory(result.defaultCategory);
+      setSavedCategory(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存默认分类失败');
+    } finally {
+      setSavingCategory(false);
     }
   }
 
@@ -515,6 +546,35 @@ export default function SettingsPage() {
         注意：仅当会话开启「🔍 联网搜索」时才会生效。模型还需支持 function calling（OpenAI
         兼容接口），部分本地模型可能忽略搜索工具。
       </p>
+
+      <h2 className={styles.sectionTitle}>默认分类</h2>
+      <p className={styles.sub}>
+        新建提示词时自动填入该分类；不传分类的创建请求也会使用它。留空则保持原有行为。
+      </p>
+
+      <div className={styles.card}>
+        <label className={styles.field}>
+          <span>默认分类</span>
+          <input
+            type="text"
+            value={defaultCategory}
+            onChange={(e) => setDefaultCategory(e.target.value)}
+            list="default-category-options"
+            placeholder="留空 = 不设置默认分类"
+          />
+          <datalist id="default-category-options">
+            {categoryOptions.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
+        </label>
+        <div className={styles.actions}>
+          {savedCategory && <span className={styles.ok}>已保存 ✓</span>}
+          <button onClick={handleSaveCategory} disabled={savingCategory}>
+            {savingCategory ? '保存中…' : '保存默认分类'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -20,6 +20,12 @@ import {
   type SearchConfig,
   type SearchProvider,
 } from '../search/config.js';
+import {
+  loadPromptsConfig,
+  savePromptsConfig,
+} from '../prompts/config.js';
+
+const DEFAULT_CATEGORY_MAX = 50;
 
 function publicShape(id: string, settings: ProviderSettings) {
   return {
@@ -277,6 +283,32 @@ export function createSettingsRouter(deps: SettingsDeps = {}): Router {
 
     saveSearchConfig(newConfig);
     res.json(searchPublicShape(newConfig));
+  });
+
+  router.get('/prompts', (_req, res) => {
+    res.json({ defaultCategory: loadPromptsConfig().defaultCategory });
+  });
+
+  router.put('/prompts', (req, res) => {
+    const body = (req.body ?? {}) as { defaultCategory?: unknown };
+
+    let defaultCategory = '';
+    if (body.defaultCategory !== undefined) {
+      if (typeof body.defaultCategory !== 'string') {
+        res.status(400).json({ error: 'defaultCategory must be a string' });
+        return;
+      }
+      defaultCategory = body.defaultCategory.trim();
+    }
+    if (defaultCategory.length > DEFAULT_CATEGORY_MAX) {
+      res.status(400).json({
+        error: `defaultCategory must be at most ${DEFAULT_CATEGORY_MAX} characters`,
+      });
+      return;
+    }
+
+    savePromptsConfig({ defaultCategory });
+    res.json({ defaultCategory });
   });
 
   return router;

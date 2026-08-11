@@ -17,6 +17,7 @@ beforeAll(async () => {
   process.env.ASSET_DIR = path.join(tmpDir, 'uploads');
   process.env.PROVIDER_CONFIG_PATH = path.join(tmpDir, 'provider.json');
   process.env.WORKSHOP_CONFIG_PATH = path.join(tmpDir, 'workshop.json');
+  process.env.PROMPTS_CONFIG_PATH = path.join(tmpDir, 'prompts.json');
 
   const app = createApp();
   db = (app as { locals: { db: { close: () => void } } }).locals.db;
@@ -62,7 +63,7 @@ test('create + list + variables', async () => {
   });
   expect(status).toBe(201);
   expect(data.variables).toEqual(['name', 'topic']);
-  expect(data.type).toBe('text');
+  expect(data.type).toBe('multimodal');
 
   const list = await json('GET', '/api/prompts');
   expect(list.status).toBe(200);
@@ -212,6 +213,43 @@ test('delete', async () => {
 
   const missing = await json('GET', `/api/prompts/${id}`);
   expect(missing.status).toBe(404);
+});
+
+test('default category applies to create and explicit category wins', async () => {
+  const noDefault = await json('POST', '/api/prompts', {
+    title: 'No Category',
+    content: 'x',
+  });
+  expect(noDefault.data.category).toBe('general');
+
+  const saved = await json('PUT', '/api/settings/prompts', {
+    defaultCategory: 'NSFW',
+  });
+  expect(saved.status).toBe(200);
+  expect(saved.data.defaultCategory).toBe('NSFW');
+
+  const withDefault = await json('POST', '/api/prompts', {
+    title: 'Uses Default',
+    content: 'x',
+  });
+  expect(withDefault.data.category).toBe('NSFW');
+
+  const explicit = await json('POST', '/api/prompts', {
+    title: 'Explicit Category',
+    content: 'x',
+    category: 'writing',
+  });
+  expect(explicit.data.category).toBe('writing');
+
+  const cleared = await json('PUT', '/api/settings/prompts', {
+    defaultCategory: '',
+  });
+  expect(cleared.status).toBe(200);
+  const afterClear = await json('POST', '/api/prompts', {
+    title: 'After Clear',
+    content: 'x',
+  });
+  expect(afterClear.data.category).toBe('general');
 });
 
 test('create prompt with variablePools', async () => {

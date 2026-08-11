@@ -32,16 +32,41 @@ function promptToForm(p: Prompt): FormState {
   };
 }
 
-function AssetThumb({ asset, onDelete }: { asset: Asset; onDelete: () => void }) {
+function AssetThumb({
+  asset,
+  dragging,
+  onDragStart,
+  onDragEnd,
+  onDrop,
+  onDelete,
+}: {
+  asset: Asset;
+  dragging: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDrop: () => void;
+  onDelete: () => void;
+}) {
   const url = api.assetFileUrl(asset.id);
   return (
-    <div className={styles.assetCard}>
+    <div
+      className={dragging ? styles.assetCardDragging : styles.assetCard}
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop();
+      }}
+      title="拖动调整顺序"
+    >
       {asset.kind === 'image' ? (
-        <a href={url} target="_blank" rel="noreferrer" className={styles.assetLink}>
-          <img className={styles.assetImg} src={url} alt={asset.fileName} />
+        <a href={url} target="_blank" rel="noreferrer" className={styles.assetLink} draggable={false}>
+          <img className={styles.assetImg} src={url} alt={asset.fileName} draggable={false} />
         </a>
       ) : (
-        <a href={url} target="_blank" rel="noreferrer" className={styles.assetFile}>
+        <a href={url} target="_blank" rel="noreferrer" className={styles.assetFile} draggable={false}>
           {asset.fileName}
         </a>
       )}
@@ -49,7 +74,7 @@ function AssetThumb({ asset, onDelete }: { asset: Asset; onDelete: () => void })
         <button
           className={styles.assetDelete}
           onClick={onDelete}
-                    aria-label="删除附件"
+          aria-label="删除附件"
         >
           ✕
         </button>
@@ -125,6 +150,25 @@ export default function DetailPage() {
     if (!confirm('删除这张图片？')) return;
     await api.deleteAsset(id, assetId);
     load();
+  }
+
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+
+  async function handleDrop(targetIndex: number) {
+    const from = dragIndex;
+    setDragIndex(null);
+    if (from === null || from === targetIndex) return;
+    const next = [...assets];
+    const [item] = next.splice(from, 1);
+    next.splice(targetIndex, 0, item);
+    setAssets(next);
+    try {
+      const ordered = await api.reorderAssets(id, next.map((a) => a.id));
+      setAssets(ordered);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '调整顺序失败');
+      load();
+    }
   }
 
   async function handleCopy() {
@@ -309,8 +353,16 @@ export default function DetailPage() {
 
       {assets.length > 0 && (
         <div className={styles.assets}>
-          {assets.map((a) => (
-            <AssetThumb key={a.id} asset={a} onDelete={() => handleDeleteAsset(a.id)} />
+          {assets.map((a, i) => (
+            <AssetThumb
+              key={a.id}
+              asset={a}
+              dragging={dragIndex === i}
+              onDragStart={() => setDragIndex(i)}
+              onDragEnd={() => setDragIndex(null)}
+              onDrop={() => handleDrop(i)}
+              onDelete={() => handleDeleteAsset(a.id)}
+            />
           ))}
         </div>
       )}

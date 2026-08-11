@@ -21,7 +21,7 @@ export const EMPTY_FORM: FormState = {
   category: '',
   tags: '',
   isFavorite: false,
-  type: 'text',
+  type: 'multimodal',
   parameters: {},
   variablePools: {},
   files: [],

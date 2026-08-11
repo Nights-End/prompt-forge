@@ -21,6 +21,9 @@ apps/api/data/search.json
 # Local workshop runtime config (default extra prompt, custom presets)
 apps/api/data/workshop.json
 
+# Local prompts config (default category)
+apps/api/data/prompts.json
+
 # Logs
 *.log
 npm-debug.log*

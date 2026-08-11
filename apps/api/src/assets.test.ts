@@ -137,6 +137,62 @@ test('delete asset removes file from disk', async () => {
   expect(missing.status).toBe(404);
 });
 
+test('reorder assets updates sort order', async () => {
+  const id = await createPrompt('AssetReorderPrompt');
+  const form = new FormData();
+  for (let i = 0; i < 3; i++) {
+    form.append('files', new File([PNG], `img${i}.png`, { type: 'image/png' }));
+  }
+  const uploadRes = await fetch(`${base}/api/prompts/${id}/assets`, {
+    method: 'POST',
+    body: form,
+  });
+  const assets = (await uploadRes.json()) as { id: string; fileName: string }[];
+  expect(assets.map((a) => a.fileName)).toEqual(['img0.png', 'img1.png', 'img2.png']);
+
+  const reversed = assets.map((a) => a.id).reverse();
+  const { status, data } = await json('PUT', `/api/prompts/${id}/assets/order`, {
+    assetIds: reversed,
+  });
+  expect(status).toBe(200);
+  expect(data.map((a: { fileName: string }) => a.fileName)).toEqual([
+    'img2.png',
+    'img1.png',
+    'img0.png',
+  ]);
+
+  const list = await json('GET', `/api/prompts/${id}/assets`);
+  expect(list.data.map((a: { fileName: string }) => a.fileName)).toEqual([
+    'img2.png',
+    'img1.png',
+    'img0.png',
+  ]);
+});
+
+test('reorder assets rejects unknown ids and bad payloads', async () => {
+  const id = await createPrompt('AssetReorderBadPrompt');
+  const form = new FormData();
+  form.append('files', new File([PNG], 'a.png', { type: 'image/png' }));
+  const uploadRes = await fetch(`${base}/api/prompts/${id}/assets`, {
+    method: 'POST',
+    body: form,
+  });
+  const assets = (await uploadRes.json()) as { id: string }[];
+
+  const unknown = await json('PUT', `/api/prompts/${id}/assets/order`, {
+    assetIds: ['does-not-exist'],
+  });
+  expect(unknown.status).toBe(400);
+
+  const missing = await json('PUT', `/api/prompts/${id}/assets/order`, {
+    assetIds: [assets[0].id, 42],
+  });
+  expect(missing.status).toBe(400);
+
+  const empty = await json('PUT', `/api/prompts/${id}/assets/order`, {});
+  expect(empty.status).toBe(400);
+});
+
 test('deleting a prompt removes its asset files', async () => {
   const id = await createPrompt('AssetCascadePrompt');
   const form = new FormData();

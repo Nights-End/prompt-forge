@@ -1,13 +1,37 @@
 import PromptForm from '../components/PromptForm';
-import { formToInput, FormState } from '../types';
+import { formToInput, FormState, EMPTY_FORM } from '../types';
 import { api } from '../api/client';
 import { useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import styles from './NewPromptPage.module.css';
 
 export default function NewPromptPage() {
   const navigate = useNavigate();
   const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
+  const [initial, setInitial] = useState<FormState | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getPromptsSettings()
+      .then(({ defaultCategory }) => {
+        if (cancelled) return;
+        setInitial({
+          ...EMPTY_FORM,
+          category: defaultCategory.trim(),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setInitial(EMPTY_FORM);
+      })
+      .finally(() => {
+        if (!cancelled) setReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSubmit(form: FormState) {
     try {
@@ -25,11 +49,16 @@ export default function NewPromptPage() {
     <div className={styles.page}>
       <h1 className={styles.title}>新建提示词</h1>
       {error && <div className={styles.error}>{error}</div>}
-      <PromptForm
-        submitLabel="创建"
-        onSubmit={handleSubmit}
-        onCancel={() => navigate('/')}
-      />
+      {ready ? (
+        <PromptForm
+          initial={initial}
+          submitLabel="创建"
+          onSubmit={handleSubmit}
+          onCancel={() => navigate('/')}
+        />
+      ) : (
+        <div className={styles.state}>加载中…</div>
+      )}
     </div>
   );
 }

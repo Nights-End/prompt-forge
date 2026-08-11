@@ -16,6 +16,7 @@ let mockFetch: ReturnType<typeof vi.fn>;
 beforeEach(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-forge-settings-'));
   process.env.PROVIDER_CONFIG_PATH = path.join(tmpDir, 'provider.json');
+  process.env.PROMPTS_CONFIG_PATH = path.join(tmpDir, 'prompts.json');
   delete process.env.PF_LLM_API_KEY;
 
   mockFetch = vi.fn();
@@ -51,6 +52,16 @@ async function requestModels(body: unknown) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  return { status: res.status, data: text ? JSON.parse(text) : null };
+}
+
+async function requestPrompts(method: string, body?: unknown) {
+  const res = await fetch(`${base}/api/settings/prompts`, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
   return { status: res.status, data: text ? JSON.parse(text) : null };
@@ -236,4 +247,37 @@ test('models endpoint validates baseUrl and kind', async () => {
 
   const badKind = await requestModels({ kind: 'wat', baseUrl: 'https://x' });
   expect(badKind.status).toBe(400);
+});
+
+test('prompts settings returns empty default category by default', async () => {
+  const { status, data } = await requestPrompts('GET');
+  expect(status).toBe(200);
+  expect(data).toEqual({ defaultCategory: '' });
+});
+
+test('prompts settings saves and reads back default category', async () => {
+  const put = await requestPrompts('PUT', { defaultCategory: 'NSFW' });
+  expect(put.status).toBe(200);
+  expect(put.data).toEqual({ defaultCategory: 'NSFW' });
+
+  const get = await requestPrompts('GET');
+  expect(get.data).toEqual({ defaultCategory: 'NSFW' });
+});
+
+test('prompts settings trims and clears default category', async () => {
+  const put = await requestPrompts('PUT', { defaultCategory: '  writing  ' });
+  expect(put.status).toBe(200);
+  expect(put.data).toEqual({ defaultCategory: 'writing' });
+
+  const clear = await requestPrompts('PUT', { defaultCategory: '' });
+  expect(clear.status).toBe(200);
+  expect(clear.data).toEqual({ defaultCategory: '' });
+});
+
+test('prompts settings rejects invalid payloads', async () => {
+  const nonString = await requestPrompts('PUT', { defaultCategory: 42 });
+  expect(nonString.status).toBe(400);
+
+  const tooLong = await requestPrompts('PUT', { defaultCategory: 'x'.repeat(51) });
+  expect(tooLong.status).toBe(400);
 });

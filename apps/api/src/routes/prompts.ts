@@ -350,6 +350,29 @@ export function createPromptsRouter(
     res.json(assetRepo.listByPrompt(prompt.id));
   });
 
+  router.put('/:id/assets/order', (req, res) => {
+    const prompt = repo.getById(req.params.id);
+    if (!prompt) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const orderedIds = req.body?.assetIds;
+    if (
+      !Array.isArray(orderedIds) ||
+      orderedIds.some((id) => typeof id !== 'string')
+    ) {
+      res.status(400).json({ error: 'assetIds (array of strings) is required' });
+      return;
+    }
+    try {
+      res.json(assetRepo.reorder(prompt.id, orderedIds));
+    } catch (e) {
+      res.status(400).json({
+        error: e instanceof Error ? e.message : 'invalid asset order',
+      });
+    }
+  });
+
   router.delete('/:id/assets/:assetId', (req, res) => {
     const asset = assetRepo.getById(req.params.assetId);
     if (!asset || asset.promptId !== req.params.id) {

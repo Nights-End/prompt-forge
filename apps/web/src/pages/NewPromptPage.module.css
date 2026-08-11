@@ -11,3 +11,9 @@
   color: var(--danger);
   margin-bottom: 12px;
 }
+
+.state {
+  color: var(--muted);
+  text-align: center;
+  padding: 40px 0;
+}

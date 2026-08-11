@@ -52,11 +52,21 @@ function SaveFilePreview({
   file: File;
   onRemove: () => void;
 }) {
-  const [url] = useState(() => URL.createObjectURL(file));
-  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+  const [src, setSrc] = useState<string | undefined>();
+  useEffect(() => {
+    let cancelled = false;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (!cancelled) setSrc(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    return () => {
+      cancelled = true;
+    };
+  }, [file]);
   return (
     <div className={styles.imagePreviewItem}>
-      <img src={url} alt="" className={styles.imageThumb} />
+      <img src={src} alt="" className={styles.imageThumb} />
       <button
         className={styles.imageRemove}
         onClick={onRemove}
@@ -408,6 +418,7 @@ export default function WorkshopPage() {
   const [presetManagerOpen, setPresetManagerOpen] = useState(false);
   const [defaultExtraPrompt, setDefaultExtraPrompt] = useState('');
   const defaultExtraPromptRef = useRef('');
+  const defaultCategoryRef = useRef('');
 
   const [title, setTitle] = useState('');
   const [input, setInput] = useState('');
@@ -538,14 +549,16 @@ export default function WorkshopPage() {
       }
 
       try {
-        const [presetList, config] = await Promise.all([
+        const [presetList, config, promptsSettings] = await Promise.all([
           api.listPresets(),
           api.getWorkshopConfig(),
+          api.getPromptsSettings(),
         ]);
         if (cancelled) return;
         setPresets(presetList);
         setDefaultExtraPrompt(config.defaultExtraSystemPrompt ?? '');
         defaultExtraPromptRef.current = config.defaultExtraSystemPrompt ?? '';
+        defaultCategoryRef.current = promptsSettings.defaultCategory ?? '';
 
         if (conversationIdParam) {
           await loadConversation(conversationIdParam);
@@ -1010,7 +1023,7 @@ export default function WorkshopPage() {
       const p = await api.createPrompt({
         title: saveTitle.trim() || conversation?.title || '图像提示词',
         content: currentPrompt,
-        category: saveCategory.trim() || 'image-gen',
+        category: saveCategory.trim() || defaultCategoryRef.current || 'image-gen',
         tags: saveTags
           .split(',')
           .map((t) => t.trim())
@@ -1022,6 +1035,13 @@ export default function WorkshopPage() {
         await api.uploadAssets(p.id, saveFiles);
       }
       setSavedPrompt({ id: p.id, title: p.title });
+      setCurrentPrompt('');
+      setSaveFiles([]);
+      setSaveParams({});
+      setSaveParamsOpen(false);
+      setSaveOpen(false);
+      setBanner(`已保存「${p.title}」，可前往提示词库查看`);
+      setTimeout(() => setBanner(''), 3000);
     } catch (e) {
       setBanner(e instanceof Error ? e.message : '保存提示词失败');
     } finally {

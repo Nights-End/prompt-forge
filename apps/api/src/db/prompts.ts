@@ -2,6 +2,7 @@ import type { Prompt, PromptInput, PromptParameters, PromptType } from '@prompt-
 import { extractVariables } from '@prompt-forge/shared';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
+import { getDefaultCategory } from '../prompts/config.js';
 
 interface PromptRow {
   id: string;
@@ -65,12 +66,12 @@ function rowToRowValues(prompt: PromptInput): {
     title: prompt.title,
     content: prompt.content,
     description: prompt.description ?? null,
-    category: prompt.category?.trim() || 'general',
+    category: prompt.category?.trim() || getDefaultCategory() || 'general',
     tags: JSON.stringify(prompt.tags ?? []),
     variables: JSON.stringify(extractVariables(prompt.content)),
     variablePools: JSON.stringify(prompt.variablePools ?? {}),
     isFavorite: prompt.isFavorite ? 1 : 0,
-    type: prompt.type ?? 'text',
+    type: prompt.type ?? 'multimodal',
     parameters: JSON.stringify(prompt.parameters ?? {}),
   };
 }

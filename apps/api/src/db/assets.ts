@@ -97,4 +97,20 @@ export class AssetRepository {
     const result = this.db.prepare('DELETE FROM assets WHERE id = ?').run(id);
     return result.changes > 0;
   }
+
+  reorder(promptId: string, orderedIds: string[]): Asset[] {
+    const existing = this.listByPrompt(promptId);
+    const byId = new Map(existing.map((a) => [a.id, a]));
+    const unknown = orderedIds.filter((id) => !byId.has(id));
+    if (unknown.length > 0) {
+      throw new Error(`unknown asset ids: ${unknown.join(', ')}`);
+    }
+    const update = this.db.prepare(
+      'UPDATE assets SET sortOrder = ? WHERE id = ?',
+    );
+    this.db.transaction(() => {
+      orderedIds.forEach((id, index) => update.run(index, id));
+    })();
+    return this.listByPrompt(promptId);
+  }
 }

@@ -109,6 +109,11 @@ export const api = {
   },
   deleteAsset: (promptId: string, assetId: string) =>
     request<void>(`/prompts/${promptId}/assets/${assetId}`, { method: 'DELETE' }),
+  reorderAssets: (promptId: string, assetIds: string[]) =>
+    request<Asset[]>(`/prompts/${promptId}/assets/order`, {
+      method: 'PUT',
+      body: JSON.stringify({ assetIds }),
+    }),
   assetFileUrl: (assetId: string) => `${BASE}/assets/${assetId}/file`,
   exportZip: async (): Promise<Blob> => {
     const res = await fetch(`${BASE}/export`);
@@ -200,6 +205,13 @@ export const api = {
     request<{ defaultExtraSystemPrompt: string }>('/workshop/config'),
   saveWorkshopConfig: (patch: { defaultExtraSystemPrompt?: string }) =>
     request<{ defaultExtraSystemPrompt: string }>('/workshop/config', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  getPromptsSettings: () =>
+    request<{ defaultCategory: string }>('/settings/prompts'),
+  savePromptsSettings: (patch: { defaultCategory?: string }) =>
+    request<{ defaultCategory: string }>('/settings/prompts', {
       method: 'PUT',
       body: JSON.stringify(patch),
     }),
