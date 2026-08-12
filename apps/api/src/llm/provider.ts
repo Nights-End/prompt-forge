@@ -5,6 +5,7 @@ import {
   resolveApiKey,
   resolveVisionApiKey,
   type ProviderId,
+  type ProviderKind,
   type ProviderSettings,
 } from './config.js';
 import type { ConversationMessage, ToolCall } from '@prompt-forge/shared';
@@ -16,6 +17,7 @@ export interface UpstreamTarget {
   baseUrl: string;
   headers: Record<string, string>;
   model: string | undefined;
+  kind?: ProviderKind;
 }
 
 export type ResolveUpstreamResult =
@@ -48,7 +50,7 @@ export function resolveUpstream(providerId: ProviderId): ResolveUpstreamResult {
 
   return {
     ok: true,
-    value: { baseUrl, headers, model: settings.model || undefined },
+    value: { baseUrl, headers, model: settings.model || undefined, kind: settings.kind },
   };
 }
 
@@ -93,7 +95,7 @@ export function resolveVisionUpstream(): ResolveUpstreamResult {
 
   return {
     ok: true,
-    value: { baseUrl, headers, model: settings.model || undefined },
+    value: { baseUrl, headers, model: settings.model || undefined, kind: settings.kind },
   };
 }
 
@@ -318,6 +320,9 @@ export async function chatCompletions(
   };
   if (body.tools) requestBody.tools = body.tools;
   if (body.tool_choice) requestBody.tool_choice = body.tool_choice;
+  // Ollama's OpenAI-compatible endpoint defaults to num_gpu=0 (CPU only);
+  // -1 lets Ollama pick the best device (GPU when available).
+  if (target.kind === 'ollama') requestBody.options = { num_gpu: -1 };
 
   const response = await fetchImpl(`${target.baseUrl}/chat/completions`, {
     method: 'POST',

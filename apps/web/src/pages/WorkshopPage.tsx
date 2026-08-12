@@ -436,7 +436,12 @@ export default function WorkshopPage() {
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveTitle, setSaveTitle] = useState('');
   const [saveCategory, setSaveCategory] = useState('image-gen');
+  const [saveCategoryFocused, setSaveCategoryFocused] = useState(false);
+  const saveCategoryRef = useRef<HTMLDivElement | null>(null);
   const [saveTags, setSaveTags] = useState('');
+  const [saveTagInput, setSaveTagInput] = useState('');
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [allCategories, setAllCategories] = useState<string[]>([]);
   const [savingPrompt, setSavingPrompt] = useState(false);
   const [savedPrompt, setSavedPrompt] = useState<{ id: string; title: string } | null>(
     null,
@@ -448,6 +453,7 @@ export default function WorkshopPage() {
   const [saveParams, setSaveParams] = useState<Record<string, string>>({});
 
   const [images, setImages] = useState<string[]>([]);
+  const [dragActive, setDragActive] = useState(false);
   const [toolSearchQuery, setToolSearchQuery] = useState<string | null>(null);
   const [visionStatus, setVisionStatus] = useState<string | null>(null);
   const [searchEnabled, setSearchEnabled] = useState(false);
@@ -758,6 +764,33 @@ export default function WorkshopPage() {
     e.target.value = '';
   }
 
+  const addImagesRef = useRef(handleAddImages);
+  addImagesRef.current = handleAddImages;
+  const streamingRef = useRef(streaming);
+  streamingRef.current = streaming;
+  const reverseBusyRef = useRef(reverseBusy);
+  reverseBusyRef.current = reverseBusy;
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (streamingRef.current || reverseBusyRef.current) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const f = items[i].getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length === 0) return;
+      e.preventDefault();
+      addImagesRef.current(files);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, []);
+
   async function handleReverse() {
     if (reverseBusy || streaming || images.length === 0) return;
     const firstRound = messages.length === 0;
@@ -1013,6 +1046,64 @@ export default function WorkshopPage() {
     } catch (e) {
       setBanner(e instanceof Error ? e.message : '撤销失败');
     }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([api.listTags(), api.getCategories()])
+      .then(([tags, categories]) => {
+        if (cancelled) return;
+        setAllTags(tags);
+        setAllCategories(categories);
+      })
+      .catch(() => {
+        // tag/category library is best-effort
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function saveCategoryCandidates(): string[] {
+    const q = saveCategory.trim().toLowerCase();
+    return allCategories.filter(
+      (c) => c !== saveCategory.trim() && (!q || c.toLowerCase().includes(q)),
+    );
+  }
+
+  function handleSaveCategoryBlur(e: React.FocusEvent) {
+    const next = e.relatedTarget as Node | null;
+    if (saveCategoryRef.current && next && saveCategoryRef.current.contains(next)) {
+      return;
+    }
+    setSaveCategoryFocused(false);
+  }
+
+  function saveTagList(): string[] {
+    return saveTags
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+  }
+
+  function addSaveTag(raw: string) {
+    const tag = raw.trim();
+    if (!tag) return;
+    const current = saveTagList();
+    if (current.includes(tag)) return;
+    setSaveTags([...current, tag].join(', '));
+  }
+
+  function removeSaveTag(tag: string) {
+    setSaveTags(saveTagList().filter((t) => t !== tag).join(', '));
+  }
+
+  function saveTagCandidates(): string[] {
+    const current = saveTagList();
+    const q = saveTagInput.trim().toLowerCase();
+    return allTags.filter(
+      (t) => !current.includes(t) && (!q || t.toLowerCase().includes(q)),
+    );
   }
 
   async function handleSavePrompt() {
@@ -1288,7 +1379,28 @@ export default function WorkshopPage() {
             <div ref={bottomRef} />
           </div>
 
-          <div className={styles.inputArea}>
+          <div
+            className={
+              dragActive ? `${styles.inputArea} ${styles.dragActive}` : styles.inputArea
+            }
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes('Files')) {
+                e.preventDefault();
+                setDragActive(true);
+              }
+            }}
+            onDragLeave={(e) => {
+              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+              setDragActive(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragActive(false);
+              if (streaming || reverseBusy) return;
+              const files = Array.from(e.dataTransfer.files ?? []);
+              if (files.length > 0) handleAddImages(files);
+            }}
+          >
             <textarea
               className={styles.input}
               value={input}
@@ -1297,21 +1409,6 @@ export default function WorkshopPage() {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   handleSend();
-                }
-              }}
-              onPaste={(e) => {
-                const items = e.clipboardData?.items;
-                if (!items) return;
-                const imageFiles: File[] = [];
-                for (let i = 0; i < items.length; i++) {
-                  if (items[i].type.startsWith('image/')) {
-                    const f = items[i].getAsFile();
-                    if (f) imageFiles.push(f);
-                  }
-                }
-                if (imageFiles.length > 0) {
-                  e.preventDefault();
-                  handleAddImages(imageFiles);
                 }
               }}
               placeholder="描述你的想法…（Enter 发送，Shift+Enter 换行，可粘贴/拖拽图片）"
@@ -1429,18 +1526,96 @@ export default function WorkshopPage() {
               </label>
               <label className={styles.saveField}>
                 <span>分类</span>
-                <input
-                  value={saveCategory}
-                  onChange={(e) => setSaveCategory(e.target.value)}
-                />
+                <div
+                  className={styles.saveCategoryPicker}
+                  ref={saveCategoryRef}
+                  onBlur={handleSaveCategoryBlur}
+                >
+                  <input
+                    value={saveCategory}
+                    onChange={(e) => setSaveCategory(e.target.value)}
+                    onFocus={() => setSaveCategoryFocused(true)}
+                    placeholder="例如：image-gen"
+                  />
+                  {saveCategoryFocused && saveCategoryCandidates().length > 0 && (
+                    <div className={styles.saveTagSuggest}>
+                      {saveCategoryCandidates().map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          className={styles.saveTagSuggestItem}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setSaveCategory(c);
+                            setSaveCategoryFocused(false);
+                          }}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </label>
               <label className={styles.saveField}>
-                <span>标签（逗号分隔，可选）</span>
-                <input
-                  value={saveTags}
-                  onChange={(e) => setSaveTags(e.target.value)}
-                  placeholder="cat, cyberpunk"
-                />
+                <span>标签（可选）</span>
+                <div className={styles.saveTagPicker}>
+                  <div className={styles.saveTagRow}>
+                    {saveTagList().map((tag) => (
+                      <span key={tag} className={styles.saveTagChip}>
+                        {tag}
+                        <button
+                          type="button"
+                          className={styles.saveTagRemove}
+                          onClick={() => removeSaveTag(tag)}
+                          aria-label={`移除标签 ${tag}`}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                    <input
+                      value={saveTagInput}
+                      onChange={(e) => setSaveTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ',') {
+                          e.preventDefault();
+                          addSaveTag(saveTagInput);
+                          setSaveTagInput('');
+                        } else if (
+                          e.key === 'Backspace' &&
+                          !saveTagInput &&
+                          saveTagList().length > 0
+                        ) {
+                          removeSaveTag(saveTagList()[saveTagList().length - 1]);
+                        }
+                      }}
+                      onBlur={() => {
+                        addSaveTag(saveTagInput);
+                        setSaveTagInput('');
+                      }}
+                      placeholder="输入后回车添加，或选择已有标签"
+                    />
+                  </div>
+                  {saveTagCandidates().length > 0 && (
+                    <div className={styles.saveTagSuggest}>
+                      {saveTagCandidates().map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          className={styles.saveTagSuggestItem}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            addSaveTag(tag);
+                            setSaveTagInput('');
+                          }}
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </label>
               <div className={styles.saveField}>
                 <button

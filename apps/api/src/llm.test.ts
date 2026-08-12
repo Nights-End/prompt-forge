@@ -76,6 +76,7 @@ test('ollama provider posts without auth header', async () => {
   expect(url).toBe('http://localhost:11434/v1/chat/completions');
   expect(init.headers).not.toHaveProperty('Authorization');
   expect(JSON.parse(init.body).model).toBe('llama3.1');
+  expect(JSON.parse(init.body).options).toEqual({ num_gpu: -1 });
 });
 
 test('ollama baseUrl without /v1 is normalized', async () => {
@@ -114,6 +115,7 @@ test('openai-compatible provider sends Bearer key from config', async () => {
   const [url, init] = mockFetch.mock.calls[0];
   expect(url).toBe('https://api.example.com/v1/chat/completions');
   expect(init.headers.Authorization).toBe('Bearer sk-secret');
+  expect(JSON.parse(init.body).options).toBeUndefined();
 });
 
 test('PF_LLM_API_KEY env var overrides stored key', async () => {

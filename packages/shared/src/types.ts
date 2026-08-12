@@ -68,6 +68,8 @@ export interface ListPromptQuery {
   tag?: string;
   favorite?: boolean;
   type?: PromptType;
+  limit?: number;
+  offset?: number;
 }
 
 export type PresetId = string;

@@ -215,3 +215,35 @@
   color: var(--danger);
   margin-bottom: 12px;
 }
+
+.loadMoreWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0 4px;
+}
+
+.loadMoreHint {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.loadMoreBtn {
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+  padding: 8px 28px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.loadMoreBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.loadMoreBtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

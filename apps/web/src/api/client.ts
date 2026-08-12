@@ -50,6 +50,8 @@ function toQuery(query: ListPromptQuery): string {
   if (query.tag) params.set('tag', query.tag);
   if (query.favorite !== undefined) params.set('favorite', String(query.favorite));
   if (query.type) params.set('type', query.type);
+  if (query.limit !== undefined) params.set('limit', String(query.limit));
+  if (query.offset !== undefined) params.set('offset', String(query.offset));
   const qs = params.toString();
   return qs ? `?${qs}` : '';
 }

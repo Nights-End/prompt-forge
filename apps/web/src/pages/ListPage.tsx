@@ -1,18 +1,49 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../api/client';
 import { Asset, Prompt } from '@prompt-forge/shared';
 import { Link, useNavigate } from 'react-router-dom';
 import styles from './ListPage.module.css';
 
+const LIST_STATE_KEY = 'prompt-forge:list-state';
+const PAGE_SIZE = 50;
+
+interface SavedListState {
+  q: string;
+  category: string;
+  favorite: boolean;
+  prompts: Prompt[];
+  assetMap: Record<string, Asset[]>;
+  hasMore: boolean;
+  scrollY: number;
+}
+
+function loadSavedState(): SavedListState | null {
+  try {
+    const raw = sessionStorage.getItem(LIST_STATE_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw) as SavedListState;
+    if (!Array.isArray(s.prompts)) return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
 export default function ListPage() {
-  const [prompts, setPrompts] = useState<Prompt[]>([]);
-  const [assetMap, setAssetMap] = useState<Record<string, Asset[]>>({});
+  const saved = useRef<SavedListState | null>(loadSavedState()).current;
+  const [prompts, setPrompts] = useState<Prompt[]>(saved?.prompts ?? []);
+  const [assetMap, setAssetMap] = useState<Record<string, Asset[]>>(
+    saved?.assetMap ?? {},
+  );
   const [categories, setCategories] = useState<string[]>([]);
-  const [q, setQ] = useState('');
-  const [category, setCategory] = useState('');
-  const [favorite, setFavorite] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState(saved?.q ?? '');
+  const [category, setCategory] = useState(saved?.category ?? '');
+  const [favorite, setFavorite] = useState(saved?.favorite ?? false);
+  const [loading, setLoading] = useState(!saved);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [hasMore, setHasMore] = useState(saved?.hasMore ?? false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   const load = useCallback(async () => {
@@ -24,11 +55,13 @@ export default function ListPage() {
           q: q || undefined,
           category: category || undefined,
           favorite: favorite || undefined,
+          limit: PAGE_SIZE,
         }),
         api.getCategories(),
       ]);
       setPrompts(list);
       setCategories(cats);
+      setHasMore(list.length >= PAGE_SIZE);
       if (list.length > 0) {
         try {
           setAssetMap(await api.listAssetsByPrompts(list.map((p) => p.id)));
@@ -45,9 +78,91 @@ export default function ListPage() {
     }
   }, [q, category, favorite]);
 
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    setError('');
+    try {
+      const list = await api.listPrompts({
+        q: q || undefined,
+        category: category || undefined,
+        favorite: favorite || undefined,
+        limit: PAGE_SIZE,
+        offset: prompts.length,
+      });
+      setPrompts((prev) => [...prev, ...list]);
+      setHasMore(list.length >= PAGE_SIZE);
+      if (list.length > 0) {
+        try {
+          const more = await api.listAssetsByPrompts(list.map((p) => p.id));
+          setAssetMap((prev) => ({ ...prev, ...more }));
+        } catch {
+          // asset thumbs are best-effort
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '加载更多失败');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [q, category, favorite, prompts.length, loadingMore]);
+
   useEffect(() => {
+    if (saved) return;
     load();
-  }, [load]);
+  }, [load, saved]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasMore || loading || loadingMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) loadMore();
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadingMore, loadMore]);
+
+  useEffect(() => {
+    if (saved && saved.scrollY > 0) {
+      const y = saved.scrollY;
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    }
+  }, [saved]);
+
+  useEffect(() => {
+    return () => {
+      try {
+        sessionStorage.setItem(
+          LIST_STATE_KEY,
+          JSON.stringify({
+            q,
+            category,
+            favorite,
+            prompts,
+            assetMap,
+            hasMore,
+            scrollY: window.scrollY,
+          } satisfies SavedListState),
+        );
+      } catch {
+        // sessionStorage may be full; state preservation is best-effort
+      }
+    };
+  }, [q, category, favorite, prompts, assetMap, hasMore]);
+
+  useEffect(() => {
+    if (saved) {
+      api
+        .getCategories()
+        .then(setCategories)
+        .catch(() => {
+          // categories are best-effort when restoring state
+        });
+    }
+  }, [saved]);
 
   async function handleDelete(id: string) {
     if (!confirm('删除这条提示词？')) return;
@@ -193,6 +308,19 @@ export default function ListPage() {
           );
         })}
       </ul>
+
+      {!loading && hasMore && (
+        <div className={styles.loadMoreWrap} ref={sentinelRef}>
+          {loadingMore && <span className={styles.loadMoreHint}>加载中…</span>}
+          <button
+            className={styles.loadMoreBtn}
+            onClick={loadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? '加载中…' : '加载更多'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

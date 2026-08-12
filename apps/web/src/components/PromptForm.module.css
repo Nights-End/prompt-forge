@@ -327,6 +327,94 @@ textarea {
   border-style: dashed;
 }
 
+.tagPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.categoryPicker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tagInputRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 6px 8px;
+}
+
+.tagInputRow input {
+  flex: 1;
+  min-width: 140px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 4px 0;
+}
+
+.tagInputRow input:focus {
+  border: none;
+  box-shadow: none;
+}
+
+.tagPicked {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 12px;
+  padding: 2px 4px 2px 10px;
+  border-radius: 999px;
+}
+
+.tagChipRemove {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.tagChipRemove:hover {
+  color: var(--danger);
+  background: transparent;
+}
+
+.tagSuggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.tagSuggestItem {
+  background: var(--panel-2);
+  border: 1px dashed var(--border-strong);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.tagSuggestItem:hover {
+  border-color: var(--accent);
+  color: var(--accent-2);
+}
+
 @media (max-width: 560px) {
   .row {
     grid-template-columns: 1fr;

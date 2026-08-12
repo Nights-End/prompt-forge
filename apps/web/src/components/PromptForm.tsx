@@ -52,26 +52,74 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
     }));
   }
 
+  const [tagInput, setTagInput] = useState('');
+
+  function tagList(): string[] {
+    return form.tags
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+  }
+
+  function addTag(raw: string) {
+    const tag = raw.trim();
+    if (!tag) return;
+    const current = tagList();
+    if (current.includes(tag)) return;
+    set('tags', [...current, tag].join(', '));
+  }
+
+  function removeTag(tag: string) {
+    set('tags', tagList().filter((t) => t !== tag).join(', '));
+  }
+
+  function tagCandidates(): string[] {
+    const current = tagList();
+    const q = tagInput.trim().toLowerCase();
+    return allTags.filter(
+      (t) => !current.includes(t) && (!q || t.toLowerCase().includes(q)),
+    );
+  }
+
   const [paramOpen, setParamOpen] = useState(false);
   const [poolOpen, setPoolOpen] = useState(false);
   const [allTags, setAllTags] = useState<string[]>([]);
+  const [allCategories, setAllCategories] = useState<string[]>([]);
+  const [categoryFocused, setCategoryFocused] = useState(false);
+  const categoryRef = useRef<HTMLDivElement | null>(null);
   const [focusedPoolVar, setFocusedPoolVar] = useState<string | null>(null);
   const poolSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .listTags()
-      .then((tags) => {
-        if (!cancelled) setAllTags(tags);
+    Promise.all([api.listTags(), api.getCategories()])
+      .then(([tags, categories]) => {
+        if (cancelled) return;
+        setAllTags(tags);
+        setAllCategories(categories);
       })
       .catch(() => {
-        // tag library is best-effort; the pool still works without it
+        // tag/category library is best-effort
       });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  function categoryCandidates(): string[] {
+    const q = form.category.trim().toLowerCase();
+    return allCategories.filter(
+      (c) => c !== form.category.trim() && (!q || c.toLowerCase().includes(q)),
+    );
+  }
+
+  function handleCategoryBlur(e: React.FocusEvent) {
+    const next = e.relatedTarget as Node | null;
+    if (categoryRef.current && next && categoryRef.current.contains(next)) {
+      return;
+    }
+    setCategoryFocused(false);
+  }
 
   function handlePoolBlur(e: React.FocusEvent) {
     const next = e.relatedTarget as Node | null;
@@ -307,21 +355,94 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
       <div className={styles.row}>
         <label className={styles.field}>
           <span>分类</span>
-          <input
-            type="text"
-            value={form.category}
-            onChange={(e) => set('category', e.target.value)}
-            placeholder="例如：写作"
-          />
+          <div
+            className={styles.categoryPicker}
+            ref={categoryRef}
+            onBlur={handleCategoryBlur}
+          >
+            <input
+              type="text"
+              value={form.category}
+              onChange={(e) => set('category', e.target.value)}
+              onFocus={() => setCategoryFocused(true)}
+              placeholder="例如：写作"
+            />
+            {categoryFocused && categoryCandidates().length > 0 && (
+              <div className={styles.tagSuggest}>
+                {categoryCandidates().map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={styles.tagSuggestItem}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      set('category', c);
+                      setCategoryFocused(false);
+                    }}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </label>
         <label className={styles.field}>
-          <span>标签（逗号分隔）</span>
-          <input
-            type="text"
-            value={form.tags}
-            onChange={(e) => set('tags', e.target.value)}
-            placeholder="email, marketing"
-          />
+          <span>标签</span>
+          <div className={styles.tagPicker}>
+            <div className={styles.tagInputRow}>
+              {tagList().map((tag) => (
+                <span key={tag} className={styles.tagPicked}>
+                  {tag}
+                  <button
+                    type="button"
+                    className={styles.tagChipRemove}
+                    onClick={() => removeTag(tag)}
+                    aria-label={`移除标签 ${tag}`}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+              <input
+                type="text"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    addTag(tagInput);
+                    setTagInput('');
+                  } else if (e.key === 'Backspace' && !tagInput && tagList().length > 0) {
+                    removeTag(tagList()[tagList().length - 1]);
+                  }
+                }}
+                onBlur={() => {
+                  addTag(tagInput);
+                  setTagInput('');
+                }}
+                placeholder={tagList().length > 0 ? '继续添加…' : '输入后回车添加，或选择已有标签'}
+              />
+            </div>
+            {tagCandidates().length > 0 && (
+              <div className={styles.tagSuggest}>
+                {tagCandidates().map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    className={styles.tagSuggestItem}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      addTag(tag);
+                      setTagInput('');
+                    }}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </label>
       </div>
 
