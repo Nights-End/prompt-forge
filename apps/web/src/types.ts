@@ -1,6 +1,18 @@
 import { PromptInput, PromptParameters, PromptType } from '@prompt-forge/shared';
 import { normalizeVariablePools } from '@prompt-forge/shared';
 
+export interface FormImage {
+  key: string;
+  file: File;
+  params: PromptParameters;
+}
+
+export interface FormExistingImage {
+  id: string;
+  fileName: string;
+  params: PromptParameters;
+}
+
 export interface FormState {
   title: string;
   content: string;
@@ -11,7 +23,8 @@ export interface FormState {
   type: PromptType;
   parameters: PromptParameters;
   variablePools: Record<string, string>;
-  files: File[];
+  images: FormImage[];
+  existingImages: FormExistingImage[];
 }
 
 export const EMPTY_FORM: FormState = {
@@ -24,7 +37,8 @@ export const EMPTY_FORM: FormState = {
   type: 'multimodal',
   parameters: {},
   variablePools: {},
-  files: [],
+  images: [],
+  existingImages: [],
 };
 
 export function formToInput(form: FormState): PromptInput {

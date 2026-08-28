@@ -665,38 +665,17 @@
   flex-wrap: wrap;
 }
 
-.imagePreviewItem {
-  position: relative;
-  width: 64px;
-  height: 64px;
-  border-radius: 6px;
-  overflow: hidden;
+.saveImageBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
   border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  flex: 1 1 220px;
+  min-width: 200px;
 }
 
-.imageThumb {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.imageRemove {
-  position: absolute;
-  top: 0;
-  right: 0;
-  background: var(--overlay);
-  color: #fff;
-  border: none;
-  border-radius: 0 0 0 6px;
-  cursor: pointer;
-  padding: 1px 6px;
-  font-size: 14px;
-  line-height: 1;
-}
-
-.imageRemove:hover {
-  background: var(--danger);
-}
 
 .imageRow {
   display: flex;

@@ -35,9 +35,20 @@ export default function NewPromptPage() {
 
   async function handleSubmit(form: FormState) {
     try {
-      const prompt = await api.createPrompt(formToInput(form));
-      if (form.files.length > 0) {
-        await api.uploadAssets(prompt.id, form.files);
+      const input = formToInput(form);
+      if (form.type !== 'text') delete input.parameters;
+      const prompt = await api.createPrompt(input);
+      if (form.images.length > 0) {
+        const uploaded = await api.uploadAssets(
+          prompt.id,
+          form.images.map((im) => im.file),
+        );
+        for (let i = 0; i < uploaded.length; i++) {
+          const params = form.images[i]?.params ?? {};
+          if (Object.keys(params).length > 0) {
+            await api.updateAssetGenParams(prompt.id, uploaded[i].id, params);
+          }
+        }
       }
       navigate(`/prompts/${prompt.id}`);
     } catch (e) {

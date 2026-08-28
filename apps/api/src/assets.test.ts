@@ -242,3 +242,98 @@ test('batch assets by prompts returns grouped map', async () => {
   expect(data[idB]).toHaveLength(1);
   expect(data['does-not-exist']).toBeUndefined();
 });
+
+test('patch asset genParams updates metadata and preserves upload info', async () => {
+  const id = await createPrompt('PatchParamsPrompt');
+  const form = new FormData();
+  form.append('files', new File([PNG], 'patch.png', { type: 'image/png' }));
+  const uploadRes = await fetch(`${base}/api/prompts/${id}/assets`, {
+    method: 'POST',
+    body: form,
+  });
+  const asset = ((await uploadRes.json()) as {
+    id: string;
+    metadata: Record<string, unknown>;
+  }[])[0];
+
+  const { status, data } = await json(
+    'PATCH',
+    `/api/prompts/${id}/assets/${asset.id}`,
+    { genParams: { model: 'SDXL', steps: '30', custom1: 'x' } },
+  );
+  expect(status).toBe(200);
+  expect(data.metadata.genParams).toEqual({ model: 'SDXL', steps: '30', custom1: 'x' });
+  expect(data.metadata.mimeType).toBe('image/png');
+  expect(data.metadata.size).toBeGreaterThan(0);
+
+  const list = await json('GET', `/api/prompts/${id}/assets`);
+  expect(list.data[0].metadata.genParams).toEqual({
+    model: 'SDXL',
+    steps: '30',
+    custom1: 'x',
+  });
+
+  const cleared = await json('PATCH', `/api/prompts/${id}/assets/${asset.id}`, {
+    genParams: {},
+  });
+  expect(cleared.status).toBe(200);
+  expect(cleared.data.metadata.genParams).toEqual({});
+});
+
+test('patch asset genParams rejects unknown asset, wrong prompt, and bad payload', async () => {
+  const id = await createPrompt('PatchBadPrompt');
+  const other = await createPrompt('PatchOtherPrompt');
+  const form = new FormData();
+  form.append('files', new File([PNG], 'b.png', { type: 'image/png' }));
+  const uploadRes = await fetch(`${base}/api/prompts/${id}/assets`, {
+    method: 'POST',
+    body: form,
+  });
+  const asset = ((await uploadRes.json()) as { id: string }[])[0];
+
+  const unknown = await json(
+    'PATCH',
+    `/api/prompts/${id}/assets/does-not-exist`,
+    { genParams: { a: 'b' } },
+  );
+  expect(unknown.status).toBe(404);
+
+  const wrongPrompt = await json(
+    'PATCH',
+    `/api/prompts/${other}/assets/${asset.id}`,
+    { genParams: { a: 'b' } },
+  );
+  expect(wrongPrompt.status).toBe(404);
+
+  const bad = await json('PATCH', `/api/prompts/${id}/assets/${asset.id}`, {
+    genParams: 'nope',
+  });
+  expect(bad.status).toBe(400);
+});
+
+test('patch asset genParams sanitizes keys and values', async () => {
+  const id = await createPrompt('PatchSanitizePrompt');
+  const form = new FormData();
+  form.append('files', new File([PNG], 's.png', { type: 'image/png' }));
+  const uploadRes = await fetch(`${base}/api/prompts/${id}/assets`, {
+    method: 'POST',
+    body: form,
+  });
+  const asset = ((await uploadRes.json()) as { id: string }[])[0];
+
+  const { status, data } = await json(
+    'PATCH',
+    `/api/prompts/${id}/assets/${asset.id}`,
+    {
+      genParams: {
+        model: '  SDXL  ',
+        constructor: 'x',
+        __proto__: 'y',
+        num: 42,
+        empty: '   ',
+      },
+    },
+  );
+  expect(status).toBe(200);
+  expect(data.metadata.genParams).toEqual({ model: 'SDXL' });
+});

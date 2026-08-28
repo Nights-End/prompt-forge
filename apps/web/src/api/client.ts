@@ -6,6 +6,7 @@ import type {
   Preset,
   Prompt,
   PromptInput,
+  PromptParameters,
   ListPromptQuery,
   RenderResult,
 } from '@prompt-forge/shared';
@@ -111,6 +112,15 @@ export const api = {
   },
   deleteAsset: (promptId: string, assetId: string) =>
     request<void>(`/prompts/${promptId}/assets/${assetId}`, { method: 'DELETE' }),
+  updateAssetGenParams: (
+    promptId: string,
+    assetId: string,
+    genParams: PromptParameters,
+  ) =>
+    request<Asset>(`/prompts/${promptId}/assets/${assetId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ genParams }),
+    }),
   reorderAssets: (promptId: string, assetIds: string[]) =>
     request<Asset[]>(`/prompts/${promptId}/assets/order`, {
       method: 'PUT',

@@ -101,6 +101,9 @@ const MIGRATIONS: string[] = [
   `
     ALTER TABLE prompts ADD COLUMN variablePools TEXT NOT NULL DEFAULT '{}';
   `,
+  // v8: no schema change; generation params move to asset metadata
+  // (data migration runs in migrateGenParamsToAssets after schema migration)
+  '-- v8: data-only migration (gen params to assets)',
 ];
 
 function migrate(db: Database.Database): void {
@@ -108,9 +111,62 @@ function migrate(db: Database.Database): void {
   for (let v = current; v < MIGRATIONS.length; v++) {
     db.transaction(() => {
       db.exec(MIGRATIONS[v]);
+      // v8 is data-only: run the genParams migration exactly once, inside the
+      // versioned transaction, so it cannot re-scan on every startup.
+      if (v === 7) migrateGenParamsToAssets(db);
       db.pragma(`user_version = ${v + 1}`);
     })();
   }
+}
+
+// Moves generation parameters from single-image multimodal prompts into the
+// image asset's metadata.genParams, clearing the prompt-level copy. Prompts
+// with zero or multiple images (and images that already carry genParams) are
+// left untouched. Note: the clear of prompts.parameters is one-way and runs
+// only during the v7 -> v8 upgrade, so pre-v8 rollback cannot see the moved
+// data on those prompts.
+export function migrateGenParamsToAssets(db: Database.Database): void {
+  const rows = db
+    .prepare(
+      `SELECT id, parameters FROM prompts
+       WHERE type = 'multimodal' AND parameters IS NOT NULL AND parameters != '{}'`,
+    )
+    .all() as { id: string; parameters: string }[];
+  if (rows.length === 0) return;
+
+  const getImages = db.prepare(
+    `SELECT id, metadata FROM assets
+     WHERE promptId = ? AND kind = 'image'
+     ORDER BY sortOrder ASC, createdAt ASC`,
+  );
+  const updateAsset = db.prepare('UPDATE assets SET metadata = ? WHERE id = ?');
+  const clearPrompt = db.prepare(`UPDATE prompts SET parameters = '{}' WHERE id = ?`);
+
+  db.transaction(() => {
+    for (const row of rows) {
+      const images = getImages.all(row.id) as { id: string; metadata: string }[];
+      if (images.length !== 1) continue;
+      let parameters: unknown;
+      try {
+        parameters = JSON.parse(row.parameters) as unknown;
+      } catch {
+        continue;
+      }
+      if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) {
+        continue;
+      }
+      let metadata: Record<string, unknown>;
+      try {
+        metadata = JSON.parse(images[0].metadata) as Record<string, unknown>;
+      } catch {
+        metadata = {};
+      }
+      if (metadata.genParams !== undefined) continue;
+      metadata.genParams = parameters;
+      updateAsset.run(JSON.stringify(metadata), images[0].id);
+      clearPrompt.run(row.id);
+    }
+  })();
 }
 
 export function createDb(): Database.Database {

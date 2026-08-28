@@ -5,6 +5,7 @@ import {
   Asset,
   Prompt,
   extractVariables,
+  getAssetGenParams,
   normalizeVariablePools,
   renderTemplate,
 } from '@prompt-forge/shared';
@@ -13,7 +14,7 @@ import { SparklesIcon } from '../components/icons';
 import { FormState, formToInput } from '../types';
 import styles from './DetailPage.module.css';
 
-function promptToForm(p: Prompt): FormState {
+function promptToForm(p: Prompt, assets: Asset[]): FormState {
   const poolStrings: Record<string, string> = {};
   for (const [name, values] of Object.entries(p.variablePools ?? {})) {
     poolStrings[name] = values.join(', ');
@@ -28,7 +29,14 @@ function promptToForm(p: Prompt): FormState {
     type: p.type,
     parameters: p.parameters ?? {},
     variablePools: poolStrings,
-    files: [],
+    images: [],
+    existingImages: assets
+      .filter((a) => a.kind === 'image')
+      .map((a) => ({
+        id: a.id,
+        fileName: a.fileName,
+        params: getAssetGenParams(a),
+      })),
   };
 }
 
@@ -48,6 +56,9 @@ function AssetThumb({
   onDelete: () => void;
 }) {
   const url = api.assetFileUrl(asset.id);
+  const genParams = getAssetGenParams(asset);
+  const [paramsOpen, setParamsOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   return (
     <div
       className={dragging ? styles.assetCardDragging : styles.assetCard}
@@ -78,6 +89,45 @@ function AssetThumb({
         >
           ✕
         </button>
+      )}
+      {Object.keys(genParams).length > 0 && (
+        <div className={styles.assetParams}>
+          <button
+            type="button"
+            className={styles.assetParamsToggle}
+            onClick={() => setParamsOpen((o) => !o)}
+          >
+            {paramsOpen ? '收起生成参数' : `生成参数 (${Object.keys(genParams).length})`}
+          </button>
+          {paramsOpen && (
+            <div className={styles.assetParamsBody}>
+              <div className={styles.assetParamsList}>
+                {Object.entries(genParams)
+                  .filter(([, v]) => v)
+                  .map(([key, value]) => (
+                    <div key={key} className={styles.assetParamsItem}>
+                      <span className={styles.assetParamsKey}>{key}</span>
+                      <span className={styles.assetParamsValue}>{value}</span>
+                    </div>
+                  ))}
+              </div>
+              <button
+                type="button"
+                className={styles.assetParamsCopy}
+                onClick={async () => {
+                  const lines = Object.entries(genParams)
+                    .filter(([, v]) => v)
+                    .map(([k, v]) => `${k}: ${v}`);
+                  if (lines.length > 0) await navigator.clipboard.writeText(lines.join('\n'));
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                {copied ? '已复制 ✓' : '复制全部'}
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -132,10 +182,43 @@ export default function DetailPage() {
   const rendered = prompt ? renderTemplate(prompt.content, values) : '';
 
   async function handleSave(form: FormState) {
-    await api.updatePrompt(id, formToInput(form));
-    if (form.files.length > 0) {
-      await api.uploadAssets(id, form.files);
+    const input = formToInput(form);
+    if (form.type !== 'text') delete input.parameters;
+    await api.updatePrompt(id, input);
+
+    const keptIds = new Set(form.existingImages.map((e) => e.id));
+    for (const a of assets) {
+      if (a.kind !== 'image') continue;
+      if (!keptIds.has(a.id)) await api.deleteAsset(id, a.id);
     }
+
+    await Promise.all(
+      form.existingImages.map((e) => {
+        const original = assets.find((a) => a.id === e.id);
+        if (
+          original &&
+          JSON.stringify(getAssetGenParams(original)) !== JSON.stringify(e.params)
+        ) {
+          return api.updateAssetGenParams(id, e.id, e.params);
+        }
+        return Promise.resolve();
+      }),
+    );
+
+    if (form.images.length > 0) {
+      const uploaded = await api.uploadAssets(
+        id,
+        form.images.map((im) => im.file),
+      );
+      await Promise.all(
+        uploaded.map((asset, i) => {
+          const params = form.images[i]?.params ?? {};
+          if (Object.keys(params).length === 0) return Promise.resolve();
+          return api.updateAssetGenParams(id, asset.id, params);
+        }),
+      );
+    }
+
     setEditing(false);
     load();
   }
@@ -285,7 +368,7 @@ export default function DetailPage() {
       <div className={styles.page}>
         <h1 className={styles.title}>编辑：{prompt.title}</h1>
         <PromptForm
-          initial={promptToForm(prompt)}
+          initial={promptToForm(prompt, assets)}
           submitLabel="保存"
           onSubmit={handleSave}
           onCancel={() => setEditing(false)}

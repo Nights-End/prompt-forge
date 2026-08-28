@@ -10,6 +10,7 @@ import {
   clampBatchCount,
   renderTemplate,
   renderTemplateBatch,
+  sanitizePromptParameters,
 } from '@prompt-forge/shared';
 import { parsePromptInput } from '../validation.js';
 import { storagePathToFs } from '../uploads.js';
@@ -383,6 +384,27 @@ export function createPromptsRouter(
     const filePath = storagePathToFs(uploadsDir, asset.storagePath);
     fs.rmSync(filePath, { force: true });
     res.status(204).end();
+  });
+
+  router.patch('/:id/assets/:assetId', (req, res) => {
+    const asset = assetRepo.getById(req.params.assetId);
+    if (!asset || asset.promptId !== req.params.id) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const raw = (req.body as { genParams?: unknown } | undefined)?.genParams;
+    if (
+      raw !== undefined &&
+      (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    ) {
+      res.status(400).json({ error: 'genParams must be an object' });
+      return;
+    }
+    res.json(
+      assetRepo.updateMetadata(asset.id, {
+        genParams: sanitizePromptParameters(raw),
+      }),
+    );
   });
 
   router.delete('/:id', (req, res) => {

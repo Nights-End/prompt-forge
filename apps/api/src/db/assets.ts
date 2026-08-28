@@ -1,4 +1,4 @@
-import type { Asset, AssetKind } from '@prompt-forge/shared';
+import type { Asset, AssetKind, PromptParameters } from '@prompt-forge/shared';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 
@@ -96,6 +96,20 @@ export class AssetRepository {
   delete(id: string): boolean {
     const result = this.db.prepare('DELETE FROM assets WHERE id = ?').run(id);
     return result.changes > 0;
+  }
+
+  updateMetadata(
+    assetId: string,
+    patch: { genParams?: PromptParameters },
+  ): Asset | null {
+    const existing = this.getById(assetId);
+    if (!existing) return null;
+    const metadata = { ...(existing.metadata ?? {}) };
+    if (patch.genParams !== undefined) metadata.genParams = patch.genParams;
+    this.db
+      .prepare('UPDATE assets SET metadata = ? WHERE id = ?')
+      .run(JSON.stringify(metadata), assetId);
+    return this.getById(assetId);
   }
 
   reorder(promptId: string, orderedIds: string[]): Asset[] {

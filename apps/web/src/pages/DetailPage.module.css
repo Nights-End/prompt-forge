@@ -351,6 +351,64 @@
   transition: opacity 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
+.assetParams {
+  border-top: 1px solid var(--border);
+  padding: 6px 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.assetParamsToggle {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.assetParamsToggle:hover {
+  color: var(--text);
+}
+
+.assetParamsBody {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.assetParamsList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.assetParamsItem {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.assetParamsKey {
+  color: var(--muted);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.assetParamsValue {
+  color: var(--text);
+  word-break: break-word;
+}
+
+.assetParamsCopy {
+  align-self: flex-start;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
 .paramSection {
   margin-bottom: 14px;
 }

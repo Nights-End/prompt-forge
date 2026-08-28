@@ -1,7 +1,13 @@
-import type { PromptInput, PromptType } from '@prompt-forge/shared';
-import { normalizeVariablePools } from '@prompt-forge/shared';
+import type { PromptInput, PromptParameters, PromptType } from '@prompt-forge/shared';
+import { normalizeVariablePools, sanitizePromptParameters } from '@prompt-forge/shared';
 
 const PROMPT_TYPES: PromptType[] = ['text', 'multimodal'];
+
+function parsePromptParameters(raw: unknown): PromptParameters | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  return sanitizePromptParameters(raw);
+}
 
 export interface PromptInputResult {
   ok: boolean;
@@ -26,6 +32,11 @@ export function parsePromptInput(body: unknown): PromptInputResult {
     return { ok: false, error: `type must be one of: ${PROMPT_TYPES.join(', ')}` };
   }
 
+  const parameters = parsePromptParameters(b.parameters);
+  if (b.parameters !== undefined && parameters === undefined) {
+    return { ok: false, error: 'parameters must be an object' };
+  }
+
   return {
     ok: true,
     value: {
@@ -40,6 +51,7 @@ export function parsePromptInput(body: unknown): PromptInputResult {
       isFavorite:
         typeof b.isFavorite === 'boolean' ? b.isFavorite : undefined,
       type,
+      parameters,
     },
   };
 }

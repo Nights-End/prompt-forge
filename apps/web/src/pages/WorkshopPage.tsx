@@ -9,9 +9,12 @@ import {
   type Conversation,
   type ConversationMessage,
   type Preset,
+  type PromptParameters,
 } from '@prompt-forge/shared';
-import type { ProviderId, ProviderPublicSettings } from '../types';
+import type { FormImage, ProviderId, ProviderPublicSettings } from '../types';
 import { SearchIcon, CameraIcon } from '../components/icons';
+import ParamEditor from '../components/ParamEditor';
+import FilePreview from '../components/FilePreview';
 import styles from './WorkshopPage.module.css';
 
 const STREAM_FLUSH_MS = 60;
@@ -43,39 +46,6 @@ function dataUrlToFile(dataUrl: string, index: number): File {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   const ext = mime === 'image/png' ? 'png' : 'jpg';
   return new File([bytes], `reference-${index + 1}.${ext}`, { type: mime });
-}
-
-function SaveFilePreview({
-  file,
-  onRemove,
-}: {
-  file: File;
-  onRemove: () => void;
-}) {
-  const [src, setSrc] = useState<string | undefined>();
-  useEffect(() => {
-    let cancelled = false;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (!cancelled) setSrc(reader.result as string);
-    };
-    reader.readAsDataURL(file);
-    return () => {
-      cancelled = true;
-    };
-  }, [file]);
-  return (
-    <div className={styles.imagePreviewItem}>
-      <img src={src} alt="" className={styles.imageThumb} />
-      <button
-        className={styles.imageRemove}
-        onClick={onRemove}
-        title="移除"
-      >
-        ×
-      </button>
-    </div>
-  );
 }
 
 function compressImage(file: File): Promise<string> {
@@ -446,11 +416,10 @@ export default function WorkshopPage() {
   const [savedPrompt, setSavedPrompt] = useState<{ id: string; title: string } | null>(
     null,
   );
-  const [saveFiles, setSaveFiles] = useState<File[]>([]);
+  const [saveImages, setSaveImages] = useState<FormImage[]>([]);
   const saveFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [saveParamsOpen, setSaveParamsOpen] = useState(false);
-  const [saveParams, setSaveParams] = useState<Record<string, string>>({});
+  const [saveParams, setSaveParams] = useState<PromptParameters>({});
 
   const [images, setImages] = useState<string[]>([]);
   const [dragActive, setDragActive] = useState(false);
@@ -1111,6 +1080,7 @@ export default function WorkshopPage() {
     setSavingPrompt(true);
     setSavedPrompt(null);
     try {
+      const hasImages = saveImages.length > 0;
       const p = await api.createPrompt({
         title: saveTitle.trim() || conversation?.title || '图像提示词',
         content: currentPrompt,
@@ -1119,17 +1089,26 @@ export default function WorkshopPage() {
           .split(',')
           .map((t) => t.trim())
           .filter(Boolean),
-        type: saveFiles.length > 0 ? 'multimodal' : 'text',
-        parameters: saveParams,
+        type: hasImages ? 'multimodal' : 'text',
+        parameters: hasImages ? {} : saveParams,
       });
-      if (saveFiles.length > 0) {
-        await api.uploadAssets(p.id, saveFiles);
+      if (hasImages) {
+        const uploaded = await api.uploadAssets(
+          p.id,
+          saveImages.map((im) => im.file),
+        );
+        await Promise.all(
+          uploaded.map((asset, i) => {
+            const params = saveImages[i]?.params ?? {};
+            if (Object.keys(params).length === 0) return Promise.resolve();
+            return api.updateAssetGenParams(p.id, asset.id, params);
+          }),
+        );
       }
       setSavedPrompt({ id: p.id, title: p.title });
       setCurrentPrompt('');
-      setSaveFiles([]);
+      setSaveImages([]);
       setSaveParams({});
-      setSaveParamsOpen(false);
       setSaveOpen(false);
       setBanner(`已保存「${p.title}」，可前往提示词库查看`);
       setTimeout(() => setBanner(''), 3000);
@@ -1418,16 +1397,11 @@ export default function WorkshopPage() {
             {images.length > 0 && (
               <div className={styles.imagePreviews}>
                 {images.map((dataUrl, idx) => (
-                  <div key={idx} className={styles.imagePreviewItem}>
-                    <img src={dataUrl} alt="" className={styles.imageThumb} />
-                    <button
-                      className={styles.imageRemove}
-                      onClick={() => handleRemoveImage(idx)}
-                      title="移除"
-                    >
-                      ×
-                    </button>
-                  </div>
+                  <FilePreview
+                    key={idx}
+                    url={dataUrl}
+                    onRemove={() => handleRemoveImage(idx)}
+                  />
                 ))}
               </div>
             )}
@@ -1507,9 +1481,14 @@ export default function WorkshopPage() {
                 setSaveOpen(true);
                 setSaveTitle(conversation?.title ?? '');
                 setSavedPrompt(null);
-                setSaveFiles(images.map(dataUrlToFile));
+                setSaveImages(
+                  images.map((url, i) => ({
+                    key: `ref-${i}`,
+                    file: dataUrlToFile(url, i),
+                    params: {},
+                  })),
+                );
                 setSaveParams({});
-                setSaveParamsOpen(false);
               }}
             >
               保存为提示词
@@ -1617,104 +1596,11 @@ export default function WorkshopPage() {
                   )}
                 </div>
               </label>
-              <div className={styles.saveField}>
-                <button
-                  type="button"
-                  className={styles.paramToggle}
-                  onClick={() => setSaveParamsOpen((o) => !o)}
-                >
-                  {saveParamsOpen ? '收起生成参数' : '生成参数 ▸'}
-                </button>
-                {saveParamsOpen && (
-                  <div className={styles.saveParamBody}>
-                    <div className={styles.saveParamGrid}>
-                      {(['model', 'steps', 'sampler', 'cfg', 'seed', 'resolution', 'negativePrompt'] as const).map((key) => {
-                        const labels: Record<string, string> = { model: '模型', steps: '步数', sampler: '采样器', cfg: 'CFG', seed: '种子', resolution: '分辨率', negativePrompt: '负面提示词' };
-                        return (
-                          <label key={key} className={styles.saveParamField}>
-                            <span>{labels[key]}</span>
-                            {key === 'negativePrompt' ? (
-                              <textarea
-                                rows={2}
-                                value={saveParams[key] ?? ''}
-                                onChange={(e) => setSaveParams((p: Record<string, string>) => ({ ...p, [key]: e.target.value.trim() }))}
-                                placeholder="负面提示词（可选）"
-                              />
-                            ) : (
-                              <input
-                                type="text"
-                                value={saveParams[key] ?? ''}
-                                onChange={(e) => setSaveParams((p: Record<string, string>) => ({ ...p, [key]: e.target.value.trim() }))}
-                                placeholder={key === 'model' ? 'SDXL / Flux...' : ''}
-                              />
-                            )}
-                          </label>
-                        );
-                      })}
-                    </div>
-                    <div className={styles.saveParamCustoms}>
-                      {Object.keys(saveParams)
-                        .filter((k) => !['model','steps','sampler','cfg','seed','resolution','negativePrompt'].includes(k))
-                        .map((key) => (
-                          <div key={key} className={styles.saveParamRow}>
-                            <input
-                              type="text"
-                              className={styles.saveParamKey}
-                              value={key}
-                              onChange={(e) => {
-                                const newKey = e.target.value.trim();
-                                const value = saveParams[key] ?? '';
-                                setSaveParams((p) => {
-                                  const next = { ...p };
-                                  delete next[key];
-                                  if (newKey) next[newKey] = value;
-                                  return next;
-                                });
-                              }}
-                              placeholder="参数名"
-                            />
-                            <input
-                              type="text"
-                              className={styles.saveParamVal}
-                              value={saveParams[key] ?? ''}
-                              onChange={(e) =>
-                                setSaveParams((p) => ({ ...p, [key]: e.target.value }))
-                              }
-                              placeholder="值"
-                            />
-                            <button
-                              type="button"
-                              className={styles.paramRemove}
-                              onClick={() =>
-                                setSaveParams((p) => {
-                                  const next = { ...p };
-                                  delete next[key];
-                                  return next;
-                                })
-                              }
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ))}
-                      <button
-                        type="button"
-                        className={styles.paramAdd}
-                        onClick={() =>
-                          setSaveParams((p) => {
-                            let i = 0;
-                            let k = 'custom1';
-                            while (k in p) k = `custom${++i}`;
-                            return { ...p, [k]: '' };
-                          })
-                        }
-                      >
-                        + 自定义参数
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
+              {saveImages.length === 0 && (
+                <div className={styles.saveField}>
+                  <ParamEditor value={saveParams} onChange={setSaveParams} />
+                </div>
+              )}
               <div className={styles.saveField}>
                 <span>图片（可选，随提示词保存）</span>
                 <div className={styles.saveFileActions}>
@@ -1726,9 +1612,15 @@ export default function WorkshopPage() {
                     hidden
                     onChange={(e) => {
                       const files = Array.from(e.target.files ?? []);
-                      setSaveFiles((prev) => [
+                      setSaveImages((prev) => [
                         ...prev,
-                        ...files.slice(0, MAX_IMAGES - prev.length),
+                        ...files
+                          .slice(0, MAX_IMAGES - prev.length)
+                          .map((file, i) => ({
+                            key: `${Date.now()}-${i}`,
+                            file,
+                            params: {},
+                          })),
                       ]);
                       e.target.value = '';
                     }}
@@ -1736,28 +1628,39 @@ export default function WorkshopPage() {
                   <button
                     type="button"
                     onClick={() => saveFileInputRef.current?.click()}
-                    disabled={saveFiles.length >= MAX_IMAGES}
+                    disabled={saveImages.length >= MAX_IMAGES}
                   >
                     选择图片…
                   </button>
                   <span className={styles.saveFileHint}>
-                    {saveFiles.length > 0
-                      ? `${saveFiles.length}/${MAX_IMAGES}`
+                    {saveImages.length > 0
+                      ? `${saveImages.length}/${MAX_IMAGES}`
                       : `最多 ${MAX_IMAGES} 张`}
                   </span>
                 </div>
-                {saveFiles.length > 0 && (
+                {saveImages.length > 0 && (
                   <div className={styles.imagePreviews}>
-                    {saveFiles.map((f, idx) => (
-                      <SaveFilePreview
-                        key={`${f.name}-${idx}`}
-                        file={f}
-                        onRemove={() =>
-                          setSaveFiles((prev) =>
-                            prev.filter((_, i) => i !== idx),
-                          )
-                        }
-                      />
+                    {saveImages.map((im, idx) => (
+                      <div key={im.key} className={styles.saveImageBlock}>
+                        <FilePreview
+                          file={im.file}
+                          onRemove={() =>
+                            setSaveImages((prev) =>
+                              prev.filter((_, i) => i !== idx),
+                            )
+                          }
+                        />
+                        <ParamEditor
+                          value={im.params}
+                          onChange={(params) =>
+                            setSaveImages((prev) =>
+                              prev.map((x, i) =>
+                                i === idx ? { ...x, params } : x,
+                              ),
+                            )
+                          }
+                        />
+                      </div>
                     ))}
                   </div>
                 )}

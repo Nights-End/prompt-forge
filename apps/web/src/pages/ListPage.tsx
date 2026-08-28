@@ -46,8 +46,8 @@ export default function ListPage() {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError('');
     try {
       const [list, cats] = await Promise.all([
@@ -107,10 +107,16 @@ export default function ListPage() {
     }
   }, [q, category, favorite, prompts.length, loadingMore]);
 
+  const restored = useRef<boolean>(!!saved);
+
   useEffect(() => {
-    if (saved) return;
+    if (restored.current) {
+      restored.current = false;
+      load(true);
+      return;
+    }
     load();
-  }, [load, saved]);
+  }, [load]);
 
   useEffect(() => {
     const el = sentinelRef.current;

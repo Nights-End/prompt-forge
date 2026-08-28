@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { EMPTY_FORM, FormState } from '../types';
 import { extractVariables } from '@prompt-forge/shared';
 import { api } from '../api/client';
+import ParamEditor from './ParamEditor';
+import FilePreview from './FilePreview';
 import styles from './PromptForm.module.css';
 
 interface Props {
@@ -42,13 +44,30 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
 
   function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
-    setForm((f) => ({ ...f, files: [...f.files, ...files] }));
-  }
-
-  function removeFile(index: number) {
     setForm((f) => ({
       ...f,
-      files: f.files.filter((_, i) => i !== index),
+      images: [
+        ...f.images,
+        ...files.map((file, i) => ({
+          key: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`,
+          file,
+          params: {},
+        })),
+      ],
+    }));
+  }
+
+  function removeImage(index: number) {
+    setForm((f) => ({
+      ...f,
+      images: f.images.filter((_, i) => i !== index),
+    }));
+  }
+
+  function removeExistingImage(id: string) {
+    setForm((f) => ({
+      ...f,
+      existingImages: f.existingImages.filter((a) => a.id !== id),
     }));
   }
 
@@ -81,7 +100,6 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
     );
   }
 
-  const [paramOpen, setParamOpen] = useState(false);
   const [poolOpen, setPoolOpen] = useState(false);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [allCategories, setAllCategories] = useState<string[]>([]);
@@ -144,47 +162,6 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
         },
       };
     });
-  }
-
-  const FIXED_PARAM_KEYS = [
-    'model', 'steps', 'sampler', 'cfg', 'seed',
-    'resolution', 'negativePrompt',
-  ] as const;
-
-  const PARAM_LABELS: Record<string, string> = {
-    model: '模型', steps: '步数', sampler: '采样器',
-    cfg: 'CFG', seed: '种子', resolution: '分辨率',
-    negativePrompt: '负面提示词',
-  };
-
-  const PARAM_PLACEHOLDERS: Record<string, string> = {
-    model: 'SDXL / Flux...', steps: '30', sampler: 'DPM++ 2M Karras',
-    cfg: '7', seed: '随机种子', resolution: '1024x1024',
-  };
-
-  function setParam(key: string, value: string) {
-    setForm((f) => ({
-      ...f,
-      parameters: { ...f.parameters, [key]: value.trim() || undefined },
-    }));
-  }
-
-  function removeCustomParam(key: string) {
-    setForm((f) => {
-      const next = { ...f.parameters };
-      delete next[key];
-      return { ...f, parameters: next };
-    });
-  }
-
-  function addCustomParam() {
-    let i = 0;
-    let key = 'custom1';
-    while (key in form.parameters) key = `custom${++i}`;
-    setForm((f) => ({
-      ...f,
-      parameters: { ...f.parameters, [key]: '' },
-    }));
   }
 
   return (
@@ -255,102 +232,88 @@ export default function PromptForm({ initial, submitLabel, onSubmit, onCancel }:
               onChange={handleFiles}
             />
           </label>
-          {form.files.length > 0 && (
-            <ul className={styles.fileList}>
-              {form.files.map((f, i) => (
-                <li key={`${f.name}-${i}`} className={styles.fileItem}>
-                  <span>{f.name}</span>
-                  <button
-                    type="button"
-                    className={styles.fileRemove}
-                    onClick={() => removeFile(i)}
-                    aria-label="移除"
-                  >
-                    ✕
-                  </button>
-                </li>
-              ))}
-            </ul>
+          {form.existingImages.length > 0 && (
+            <>
+              <span className={styles.imageSectionLabel}>已有图片（可编辑生成参数）</span>
+              <ul className={styles.fileList}>
+                {form.existingImages.map((img) => {
+                  const url = api.assetFileUrl(img.id);
+                  return (
+                    <li key={img.id} className={styles.imageBlock}>
+                      <div className={styles.imageBlockHead}>
+                        <FilePreview url={url} href={url} />
+                        <span className={styles.existingImageName}>
+                          {img.fileName}
+                        </span>
+                        <button
+                          type="button"
+                          className={styles.fileRemove}
+                          onClick={() => removeExistingImage(img.id)}
+                          aria-label="移除"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <ParamEditor
+                        value={img.params}
+                        onChange={(params) =>
+                          setForm((f) => ({
+                            ...f,
+                            existingImages: f.existingImages.map((x) =>
+                              x.id === img.id ? { ...x, params } : x,
+                            ),
+                          }))
+                        }
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+          {form.images.length > 0 && (
+            <>
+              <span className={styles.imageSectionLabel}>新图片（可编辑生成参数）</span>
+              <ul className={styles.fileList}>
+                {form.images.map((img, i) => (
+                  <li key={img.key} className={styles.imageBlock}>
+                    <div className={styles.imageBlockHead}>
+                      <FilePreview file={img.file} />
+                      <span>{img.file.name}</span>
+                      <button
+                        type="button"
+                        className={styles.fileRemove}
+                        onClick={() => removeImage(i)}
+                        aria-label="移除"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <ParamEditor
+                      value={img.params}
+                      onChange={(params) =>
+                        setForm((f) => ({
+                          ...f,
+                          images: f.images.map((x, idx) =>
+                            idx === i ? { ...x, params } : x,
+                          ),
+                        }))
+                      }
+                    />
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </div>
       )}
 
-      <div className={styles.paramSection}>
-        <button
-          type="button"
-          className={styles.paramToggle}
-          onClick={() => setParamOpen((o) => !o)}
-        >
-          {paramOpen ? '收起生成参数' : '生成参数 ▸'}
-        </button>
-        {paramOpen && (
-          <div className={styles.paramBody}>
-            <div className={styles.paramGrid}>
-              {FIXED_PARAM_KEYS.map((key) => (
-                <label key={key} className={styles.paramField}>
-                  <span>{PARAM_LABELS[key] ?? key}</span>
-                  {key === 'negativePrompt' ? (
-                    <textarea
-                      rows={2}
-                      value={form.parameters[key] ?? ''}
-                      onChange={(e) => setParam(key, e.target.value)}
-                      placeholder="负面提示词（可选）"
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={form.parameters[key] ?? ''}
-                      onChange={(e) => setParam(key, e.target.value)}
-                      placeholder={PARAM_PLACEHOLDERS[key] ?? ''}
-                    />
-                  )}
-                </label>
-              ))}
-            </div>
-            <div className={styles.paramCustoms}>
-              {Object.keys(form.parameters)
-                .filter((k) => !(FIXED_PARAM_KEYS as readonly string[]).includes(k))
-                .map((key) => (
-                  <div key={key} className={styles.paramCustomRow}>
-                    <input
-                      type="text"
-                      className={styles.paramCustomKey}
-                      value={key}
-                      onChange={(e) => {
-                        const newKey = e.target.value.trim();
-                        const value = form.parameters[key] ?? '';
-                        removeCustomParam(key);
-                        if (newKey) setParam(newKey, value);
-                      }}
-                      placeholder="参数名"
-                    />
-                    <input
-                      type="text"
-                      className={styles.paramCustomVal}
-                      value={form.parameters[key] ?? ''}
-                      onChange={(e) => setParam(key, e.target.value)}
-                      placeholder="值"
-                    />
-                    <button
-                      type="button"
-                      className={styles.paramRemove}
-                      onClick={() => removeCustomParam(key)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              <button
-                type="button"
-                className={styles.paramAdd}
-                onClick={addCustomParam}
-              >
-                + 自定义参数
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      {form.type === 'text' && (
+        <ParamEditor
+          value={form.parameters}
+          onChange={(params) => set('parameters', params)}
+        />
+      )}
 
       <div className={styles.row}>
         <label className={styles.field}>

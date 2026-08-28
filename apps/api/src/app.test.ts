@@ -205,6 +205,27 @@ test('partial update preserves unmodified metadata', async () => {
   expect(updated.data.isFavorite).toBe(true);
 });
 
+test('prompt generation parameters are persisted and validated', async () => {
+  const created = await json('POST', '/api/prompts', {
+    title: 'Param Text',
+    content: 'x',
+    type: 'text',
+    parameters: { model: 'SDXL', steps: '30' },
+  });
+  expect(created.status).toBe(201);
+  expect(created.data.parameters).toEqual({ model: 'SDXL', steps: '30' });
+
+  const fetched = await json('GET', `/api/prompts/${created.data.id}`);
+  expect(fetched.data.parameters).toEqual({ model: 'SDXL', steps: '30' });
+
+  const bad = await json('POST', '/api/prompts', {
+    title: 'Bad Param',
+    content: 'x',
+    parameters: 'nope',
+  });
+  expect(bad.status).toBe(400);
+});
+
 test('delete', async () => {
   const created = await json('POST', '/api/prompts', { title: 'Temp', content: 'x' });
   const id = created.data.id;

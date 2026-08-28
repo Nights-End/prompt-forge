@@ -52,6 +52,40 @@ export interface Asset {
   createdAt: string;
 }
 
+export function getAssetGenParams(asset: Asset): PromptParameters {
+  const raw = asset.metadata?.genParams;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: PromptParameters = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'string') out[key] = value;
+  }
+  return out;
+}
+
+const DANGEROUS_PARAM_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const MAX_PARAM_KEYS = 32;
+const MAX_PARAM_KEY_LENGTH = 64;
+const MAX_PARAM_VALUE_LENGTH = 2048;
+
+// Single sanitizer for prompt-level and asset-level generation parameters:
+// keeps only trimmed non-empty string values, drops dangerous/oversized keys.
+export function sanitizePromptParameters(raw: unknown): PromptParameters {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: PromptParameters = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (count >= MAX_PARAM_KEYS) break;
+    if (typeof value !== 'string') continue;
+    if (key.length > MAX_PARAM_KEY_LENGTH) continue;
+    if (DANGEROUS_PARAM_KEYS.has(key)) continue;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.length > MAX_PARAM_VALUE_LENGTH) continue;
+    out[key] = trimmed;
+    count++;
+  }
+  return out;
+}
+
 export interface TemplateRenderInput {
   content: string;
   values: Record<string, string>;
