@@ -30,6 +30,7 @@ pnpm run dev                     # api(3000) + web(5173) 同时启动
 pnpm run typecheck               # 全 workspace 类型检查
 pnpm --filter @prompt-forge/api test   # 后端测试（vitest）
 pnpm run build                   # shared → api → web
+node tools/import-st-prompts.mjs   # 把酒馆(SillyTavern)抽出的提示词清单灌进库；加 --dry 只统计
 ```
 
 注意：shared 包改动后需先 `pnpm --filter @prompt-forge/shared build` 再重启 api（api 通过 dist 引用）。
