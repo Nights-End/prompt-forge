@@ -24,6 +24,12 @@ apps/api/data/workshop.json
 # Local prompts config (default category)
 apps/api/data/prompts.json
 
+# /api/ext boundary config (origin allow-list + token hash; never commit)
+apps/api/data/ext.json
+
+# Plaintext shared token for the SillyTavern extension (never commit)
+apps/api/data/ext-token.txt
+
 # Logs
 *.log
 npm-debug.log*

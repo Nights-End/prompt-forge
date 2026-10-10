@@ -1,5 +1,5 @@
 import express from 'express';
-import { createDb } from './db/index.js';
+import { createDb, resolveDataDir } from './db/index.js';
 import { PromptRepository } from './db/prompts.js';
 import { AssetRepository } from './db/assets.js';
 import { ConversationRepository } from './db/conversations.js';
@@ -9,6 +9,9 @@ import { createAssetsRouter } from './routes/assets.js';
 import { createSettingsRouter } from './routes/settings.js';
 import { createLlmRouter } from './routes/llm.js';
 import { createWorkshopRouter } from './routes/workshop.js';
+import { loadExtConfig } from './ext/config.js';
+import { createExtGuard } from './ext/middleware.js';
+import { createExtRouter } from './ext/router.js';
 import { loadWorkshopConfig } from './workshop/config.js';
 import { resolveUploadsDir } from './uploads.js';
 
@@ -19,6 +22,11 @@ export function createApp(deps: { fetchImpl?: typeof fetch } = {}) {
   const assetRepo = new AssetRepository(db);
   const conversationRepo = new ConversationRepository(db);
   const uploadsDir = resolveUploadsDir();
+
+  // /api/ext boundary config (origin allow-list + token hash) is read once per
+  // process; the plaintext token and the config both live in the data dir,
+  // which .gitignore keeps out of the public repo.
+  const extConfig = loadExtConfig(resolveDataDir());
 
   app.locals.db = db;
   app.locals.uploadsDir = uploadsDir;
@@ -37,6 +45,10 @@ export function createApp(deps: { fetchImpl?: typeof fetch } = {}) {
   app.use('/api/settings', createSettingsRouter());
   app.use('/api/llm', createLlmRouter());
   app.use('/api/workshop', createWorkshopRouter(conversationRepo, { workshopConfig: loadWorkshopConfig() }));
+
+  // Write-only surface for the SillyTavern extension: loopback-only binding +
+  // origin allow-list + shared token, all enforced by extGuard.
+  app.use('/api/ext', createExtGuard(() => extConfig), createExtRouter());
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'not found' });
