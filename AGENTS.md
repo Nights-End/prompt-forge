@@ -6,10 +6,10 @@
 
 Web 应用：**提示词管理 + 文生图提示词工作台**。
 
-- 提示词库：CRUD、分类/标签/搜索/收藏、`{variable}` 模板渲染、图片资产、JSON/ZIP 导入导出、提示词"设为默认"。
-- 工作台（`/workshop`）：AI 编写/优化文生图提示词，多轮聊天、SSE 流式输出、会话持久化（SQLite）、破限提示词（会话级附加 system 指令）、自定义预设管理、参考图上传分析（视觉模型）、联网检索（function calling：Tavily / Exa / DuckDuckGo）。
+- 提示词库：CRUD、分类/标签/搜索/收藏、`{variable}` 模板渲染、**变量池与批量随机渲染**、图片资产（**附件排序**）、JSON/ZIP 导入导出、提示词"设为默认"、**默认分类**、列表**分页加载**。
+- 工作台（`/workshop`）：AI 编写/优化文生图提示词，多轮聊天、SSE 流式输出、会话持久化（SQLite）、破限提示词（会话级附加 system 指令）、自定义预设管理、参考图上传分析（视觉模型：描述/自动打标签）、提示词模板化（templatize，提取变量进变量池）、联网检索（function calling：Tavily / Exa / DuckDuckGo）。
 
-**功能已全部实现并测试通过**（85 个 API 测试 + typecheck）。没有"未完成"的规划功能。
+**功能已全部实现并测试通过**（129 个 API 测试 + typecheck）。没有"未完成"的规划功能。
 
 ## 技术栈
 
@@ -17,7 +17,7 @@ Web 应用：**提示词管理 + 文生图提示词工作台**。
 |----|------|
 | 前端 | React 18 + Vite 5 + TypeScript，CSS Modules，react-router 6 |
 | 后端 | Node.js 20 + Express 4 + TypeScript（ESM）|
-| 数据库 | SQLite（better-sqlite3），迁移机制 `PRAGMA user_version`（v1~v5）|
+| 数据库 | SQLite（better-sqlite3），迁移机制 `PRAGMA user_version`（v1~v8，v8 为 data-only：genParams→assets）|
 | 共享包 | `packages/shared`（类型 + 预设 + SSE 解析），workspace 协议 `"@prompt-forge/shared": "workspace:*"` |
 | 包管理 | **pnpm 10**（勿用 npm 混装；`package.json` 有 `pnpm.onlyBuiltDependencies: ["better-sqlite3"]`）|
 | 部署 | Docker + docker-compose（Dockerfile 均为 pnpm 构建）|
@@ -30,6 +30,7 @@ pnpm run dev                     # api(3200) + web(5273) 同时启动
 pnpm run typecheck               # 全 workspace 类型检查
 pnpm --filter @prompt-forge/api test   # 后端测试（vitest）
 pnpm run build                   # shared → api → web
+node tools/import-st-prompts.mjs   # 把酒馆(SillyTavern)抽出的提示词清单灌进库；加 --dry 只统计
 ```
 
 注意：shared 包改动后需先 `pnpm --filter @prompt-forge/shared build` 再重启 api（api 通过 dist 引用）。
@@ -39,19 +40,24 @@ pnpm run build                   # shared → api → web
 ```
 apps/api/src/
   app.ts               # 路由注册；express.json limit 20mb
-  db/index.ts          # 迁移 v1~v5（prompts/assets/conversations/conversation_messages）
+  db/index.ts          # 迁移 v1~v8（prompts/assets/conversations/conversation_messages；v8 data-only）
   db/prompts.ts        # 提示词仓库
   db/conversations.ts  # 会话+消息仓库（支持 multimodal_content、tool 消息）
   llm/config.ts        # provider 配置（provider.json，local=Ollama / cloud=OpenAI兼容）
-  llm/provider.ts      # resolveUpstream / chatCompletions / buildMessages / accumulateToolCalls
+  llm/provider.ts      # resolveUpstream / chatCompletions / buildMessages / accumulateToolCalls；visionChat/describeImages/tagImages/templatize
   search/config.ts     # 搜索配置（search.json：tavily/exa/duckduckgo/none）
   search/execute.ts    # 搜索执行（8s 超时，结果格式化）
   workshop/config.ts   # 工作台配置（workshop.json：defaultExtraSystemPrompt + customPresets）
+  prompts/config.ts    # 提示词默认分类配置
   routes/workshop.ts   # 工作台：presets CRUD / config / conversations CRUD / undo / chat(SSE+tool循环)
-  routes/settings.ts   # provider + search 配置 API
+  routes/settings.ts   # provider + search + 默认分类 配置 API
+  routes/prompts.ts    # 提示词 CRUD + generate-tags(视觉打标签) + templatize(模板化)
 apps/web/src/
   pages/WorkshopPage.tsx   # 工作台（聊天/流式/参考图/搜索开关/保存）
   pages/SettingsPage.tsx   # provider + 搜索服务配置
+  pages/DetailPage.tsx     # 提示词详情（变量池/批量随机渲染/附件排序）
+  components/ParamEditor.tsx # 参数编辑器（模板变量/参数处理）
+  components/FilePreview.tsx # 附件/资产预览
   api/client.ts            # API 封装 + streamChat（SSE 解析，onToolSearch 事件）
 packages/shared/src/
   types.ts / presets.ts / constants.ts / sse.ts   # 共享类型、内置预设、常量、SSE 解析器
@@ -64,6 +70,7 @@ packages/shared/src/
 - **参考图**：前端 Canvas 压缩（1024px / JPEG 80%），最多 5 张，base64 存 `conversation_messages.multimodal_content`；历史请求中最多携带最近 5 张图。
 - **错误回滚**：任何失败路径（上游错误/超时/空回复）都删除刚追加的 user 消息；前端收到 error 事件即移除乐观消息。
 - **会话级配置**：title / providerId / presetId / extraSystemPrompt（≤4000 字符）/ enableSearch，均可通过 PUT 修改。
+- **模板化与变量池**：`POST /api/prompts/:id/templatize` 用 LLM 把提示词拆成 `template + variables`（存为模板变量）；变量池支持**批量随机渲染**（DetailPage 按变量组合批量产出）。视觉能力：`describeImages` / `tagImages`（`POST /:id/generate-tags` 自动打标签，复用 visionChat 的多图请求/响应抽取）。
 
 ## 安全与数据（重要）
 
