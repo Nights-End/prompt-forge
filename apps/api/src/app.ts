@@ -2,6 +2,7 @@ import express from 'express';
 import { createDb, resolveDataDir } from './db/index.js';
 import { PromptRepository } from './db/prompts.js';
 import { AssetRepository } from './db/assets.js';
+import { ExtDedupeRepository } from './db/extDedupe.js';
 import { ConversationRepository } from './db/conversations.js';
 import { createPromptsRouter } from './routes/prompts.js';
 import { createMetaRouter, createExportRouter, createImportRouter } from './routes/meta.js';
@@ -20,6 +21,7 @@ export function createApp(deps: { fetchImpl?: typeof fetch } = {}) {
   const db = createDb();
   const repo = new PromptRepository(db);
   const assetRepo = new AssetRepository(db);
+  const extDedupeRepo = new ExtDedupeRepository(db);
   const conversationRepo = new ConversationRepository(db);
   const uploadsDir = resolveUploadsDir();
 
@@ -48,7 +50,11 @@ export function createApp(deps: { fetchImpl?: typeof fetch } = {}) {
 
   // Write-only surface for the SillyTavern extension: loopback-only binding +
   // origin allow-list + shared token, all enforced by extGuard.
-  app.use('/api/ext', createExtGuard(() => extConfig), createExtRouter());
+  app.use(
+    '/api/ext',
+    createExtGuard(() => extConfig),
+    createExtRouter(repo, assetRepo, extDedupeRepo, uploadsDir),
+  );
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'not found' });

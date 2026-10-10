@@ -88,12 +88,14 @@ test('a real request with a wrong token is rejected', async () => {
   expect(res.status).toBe(403);
 });
 
-test('a real request with the right token clears the guard (placeholder 501)', async () => {
+test('a real request with the right token clears the guard (endpoint validation applies)', async () => {
   const res = await call('POST', '/api/ext/prompts', {
     Origin: ALLOWED,
     'X-Forge-Token': token,
   });
-  expect(res.status).toBe(501);
+  // 400, not 403: the guard let it through and the endpoint itself rejected the
+  // empty body.
+  expect(res.status).toBe(400);
   expect(res.headers.get('access-control-allow-origin')).toBe(ALLOWED);
 });
 

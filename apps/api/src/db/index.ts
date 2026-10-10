@@ -104,6 +104,19 @@ const MIGRATIONS: string[] = [
   // v8: no schema change; generation params move to asset metadata
   // (data migration runs in migrateGenParamsToAssets after schema migration)
   '-- v8: data-only migration (gen params to assets)',
+  // v9: dedupe ledger for the /api/ext write surface. The PRIMARY KEY is what
+  // makes external ingest idempotent — a replayed request finds the original
+  // row instead of creating a second prompt.
+  `
+    CREATE TABLE IF NOT EXISTS ext_dedupe (
+      dedupeKey   TEXT PRIMARY KEY,
+      contentHash TEXT NOT NULL,
+      promptId    TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+      createdAt   TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ext_dedupe_contentHash ON ext_dedupe(contentHash);
+  `,
 ];
 
 function migrate(db: Database.Database): void {
