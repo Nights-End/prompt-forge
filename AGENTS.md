@@ -26,7 +26,7 @@ Web 应用：**提示词管理 + 文生图提示词工作台**。
 
 ```bash
 pnpm install                     # 安装依赖
-pnpm run dev                     # api(3000) + web(5173) 同时启动
+pnpm run dev                     # api(3200) + web(5273) 同时启动
 pnpm run typecheck               # 全 workspace 类型检查
 pnpm --filter @prompt-forge/api test   # 后端测试（vitest）
 pnpm run build                   # shared → api → web

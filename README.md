@@ -29,7 +29,7 @@ prompt-forge/
 
 ```bash
 pnpm install
-pnpm run dev      # 同时启动 api(http://localhost:3000) + web(http://localhost:5173)
+pnpm run dev      # 同时启动 api(http://localhost:3200) + web(http://localhost:5273)
 ```
 
 - Vite 已配置代理，前端通过 `/api/*` 访问后端，无跨域问题。

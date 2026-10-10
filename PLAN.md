@@ -125,7 +125,7 @@ GET    /api/health            健康检查
 ```bash
 # 根目录（npm workspaces）
 npm install
-npm run dev        # 同时启动 api(3000) + web(5173)
+npm run dev        # 同时启动 api(3200) + web(5273)
 npm run build      # 构建前后端
 ```
 

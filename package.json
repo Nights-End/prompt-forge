@@ -8,7 +8,7 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,green \"pnpm:dev:api\" \"pnpm:dev:web\"",
+    "dev": "concurrently -n api,web -c blue,green \"pnpm --filter @prompt-forge/api dev\" \"pnpm --filter @prompt-forge/web dev\"",
     "dev:api": "pnpm --filter @prompt-forge/api dev",
     "dev:web": "pnpm --filter @prompt-forge/web dev",
     "build": "pnpm --filter @prompt-forge/shared build && pnpm --filter @prompt-forge/api build && pnpm --filter @prompt-forge/web build",
