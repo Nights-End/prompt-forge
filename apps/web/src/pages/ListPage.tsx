@@ -43,6 +43,10 @@ export default function ListPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [hasMore, setHasMore] = useState(saved?.hasMore ?? false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
@@ -170,9 +174,57 @@ export default function ListPage() {
     }
   }, [saved]);
 
+  useEffect(() => {
+    setSelected(new Set());
+  }, [q, category, favorite]);
+
+  useEffect(() => {
+    if (!previewUrl) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreviewUrl(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [previewUrl]);
+
   async function handleDelete(id: string) {
     if (!confirm('删除这条提示词？')) return;
     await api.deletePrompt(id);
+    load();
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelected(new Set());
+  }
+
+  async function handleBatchDelete() {
+    if (selected.size === 0 || batchDeleting) return;
+    if (!confirm(`删除选中的 ${selected.size} 条提示词?`)) return;
+    setBatchDeleting(true);
+    setError('');
+    const ids = [...selected];
+    const results = await Promise.allSettled(
+      ids.map((id) => api.deletePrompt(id)),
+    );
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    setBatchDeleting(false);
+    if (failed > 0) {
+      setError(`${ids.length - failed} 条已删除,${failed} 条删除失败`);
+    }
+    exitSelectMode();
     load();
   }
 
@@ -228,6 +280,28 @@ export default function ListPage() {
           只看收藏
         </label>
         <div className={styles.spacer} />
+        {selectMode ? (
+          <>
+            <span className={styles.selCount}>已选 {selected.size} 条</span>
+            <button
+              className={styles.batchDeleteBtn}
+              onClick={handleBatchDelete}
+              disabled={selected.size === 0 || batchDeleting}
+            >
+              {batchDeleting ? '删除中…' : '删除所选'}
+            </button>
+            <button className={styles.exitBatchBtn} onClick={exitSelectMode}>
+              退出批量
+            </button>
+          </>
+        ) : (
+          <button
+            className={styles.batchBtn}
+            onClick={() => setSelectMode(true)}
+          >
+            批量删除
+          </button>
+        )}
         <label className={styles.importBtn}>
           导入
           <input
@@ -271,13 +345,32 @@ export default function ListPage() {
           const thumbAsset = (assetMap[p.id] ?? []).find((a) => a.kind === 'image');
           const thumb = thumbAsset ? api.assetFileUrl(thumbAsset.id) : null;
           return (
-            <li key={p.id} className={styles.card}>
+            <li
+              key={p.id}
+              className={
+                selectMode && selected.has(p.id)
+                  ? `${styles.card} ${styles.cardSelected}`
+                  : styles.card
+              }
+            >
               <div
                 className={styles.cardBody}
-                onClick={() => navigate(`/prompts/${p.id}`)}
+                onClick={() =>
+                  selectMode ? toggleSelect(p.id) : navigate(`/prompts/${p.id}`)
+                }
               >
                 {thumb && (
-                  <img className={styles.thumb} src={thumb} alt="" loading="lazy" />
+                  <img
+                    className={styles.thumb}
+                    src={thumb}
+                    alt=""
+                    loading="lazy"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (selectMode) toggleSelect(p.id);
+                      else setPreviewUrl(thumb);
+                    }}
+                  />
                 )}
                 <div className={styles.cardTitle}>
                   {p.isFavorite && <span className={styles.fav}>★</span>}
@@ -303,13 +396,27 @@ export default function ListPage() {
                   )}
                 </div>
               </div>
-              <button
-                className={styles.deleteBtn}
-                onClick={() => handleDelete(p.id)}
-                aria-label="删除"
-              >
-                ✕
-              </button>
+              {selectMode ? (
+                <button
+                  className={
+                    selected.has(p.id)
+                      ? `${styles.checkBubble} ${styles.checkBubbleOn}`
+                      : styles.checkBubble
+                  }
+                  onClick={() => toggleSelect(p.id)}
+                  aria-label={selected.has(p.id) ? '取消选择' : '选择'}
+                >
+                  {selected.has(p.id) ? '✓' : ''}
+                </button>
+              ) : (
+                <button
+                  className={styles.deleteBtn}
+                  onClick={() => handleDelete(p.id)}
+                  aria-label="删除"
+                >
+                  ✕
+                </button>
+              )}
             </li>
           );
         })}
@@ -324,6 +431,28 @@ export default function ListPage() {
             disabled={loadingMore}
           >
             {loadingMore ? '加载中…' : '加载更多'}
+          </button>
+        </div>
+      )}
+
+      {previewUrl && (
+        <div
+          className={styles.lightbox}
+          onClick={() => setPreviewUrl(null)}
+          role="presentation"
+        >
+          <img
+            className={styles.lightboxImg}
+            src={previewUrl}
+            alt=""
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            className={styles.lightboxClose}
+            aria-label="关闭预览"
+            onClick={() => setPreviewUrl(null)}
+          >
+            ✕
           </button>
         </div>
       )}

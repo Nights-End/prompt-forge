@@ -45,7 +45,13 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-template-columns: repeat(
+    auto-fill,
+    /* 单轨最小宽 = max(170px, 四列等分宽),再用 min(100%) 兜底:
+       宽屏恰好 4 列,窄屏自动降为 3/2/1 列,永不横向溢出。
+       注意 1fr 不能进 clamp/max(非长度),所以用 minmax 包住长度表达式。 */
+    minmax(min(100%, max(170px, (100% - 3 * 14px) / 4)), 1fr)
+  );
   gap: 14px;
 }
 
@@ -158,6 +164,109 @@
 .deleteBtn:hover {
   color: #fff;
   background: var(--danger);
+}
+
+.cardSelected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.checkBubble {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--overlay);
+  border: 1.5px solid rgba(255, 255, 255, 0.75);
+  color: #fff;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.checkBubble:hover {
+  border-color: #fff;
+  background: var(--overlay);
+}
+
+.checkBubbleOn {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.batchBtn {
+  white-space: nowrap;
+}
+
+.selCount {
+  color: var(--muted);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.batchDeleteBtn {
+  white-space: nowrap;
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+}
+
+.batchDeleteBtn:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.exitBatchBtn {
+  white-space: nowrap;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 5, 14, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  cursor: zoom-out;
+  padding: 32px;
+}
+
+.lightboxImg {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  cursor: default;
+}
+
+.lightboxClose {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  background: var(--overlay);
+  border: none;
+  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  padding: 0;
+}
+
+.lightboxClose:hover {
+  background: var(--danger);
+  color: #fff;
 }
 
 .skeletonCard {
