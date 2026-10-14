@@ -12,6 +12,8 @@ export type ComfyPromptGraph = Record<string, ComfyNode>;
 // 15 号工作流(Wan2.2 GGUF I2V,Dasiwa Q4 H/L + umt5 Q4,4步/cfg1/euler,
 // 480x848@49帧=3秒,BlockSwap10)的 API 图模板。2026-10-12 实测 13:08 出片。
 // 占位符:{{image}} {{prompt}} {{negative}} {{seed}} {{prefix}}
+// 注意:ComfyUI API 图的节点引用必须是 [nodeId, slot](裸字符串会被当值传进节点,
+// 报 'str' object has no attribute 'cpu')。20.latent_image 特例取 27 的 2 号槽(latent)。
 const TEMPLATE: ComfyPromptGraph = {
   '30': { class_type: 'UnetLoaderGGUF', inputs: { unet_name: 'Wan2.2\\I2V\\Wan2.2_I2V_Dasiwa-V10_Q4_High.gguf' } },
   '31': { class_type: 'UnetLoaderGGUF', inputs: { unet_name: 'Wan2.2\\I2V\\Wan2.2_I2V_Dasiwa-V10_Q4_Low.gguf' } },
@@ -19,19 +21,19 @@ const TEMPLATE: ComfyPromptGraph = {
   '9': { class_type: 'VAELoader', inputs: { vae_name: 'Wan2.2\\wan_2.1_vae.safetensors' } },
   '23': { class_type: 'LoadImage', inputs: { image: '{{image}}' } },
   '44': { class_type: 'PrimitiveStringMultiline', inputs: { value: '{{prompt}}' } },
-  '18': { class_type: 'CLIPTextEncode', inputs: { clip: '32', text: '{{negative}}' } },
-  '29': { class_type: 'CLIPTextEncode', inputs: { clip: '32', text: '{{prompt}}' } },
-  '16': { class_type: 'PathchSageAttentionKJ', inputs: { model: '30', sage_attention: 'sageattn_qk_int8_pv_fp16_triton', allow_compile: false } },
-  '17': { class_type: 'PathchSageAttentionKJ', inputs: { model: '31', sage_attention: 'sageattn_qk_int8_pv_fp16_triton', allow_compile: false } },
-  '4': { class_type: 'ModelSamplingSD3', inputs: { model: '16', shift: 5.0 } },
-  '15': { class_type: 'ModelSamplingSD3', inputs: { model: '17', shift: 5.0 } },
-  '26': { class_type: 'XB_UNetBlockSwap', inputs: { unet_model: '15', blocks_to_swap: 10 } },
-  '25': { class_type: 'XB_UNetBlockSwap', inputs: { unet_model: '4', blocks_to_swap: 10 } },
-  '27': { class_type: 'XB_WanImageToVideo', inputs: { positive: '29', negative: '18', vae: '9', start_image: '23', width: 480, height: 848, length: 49, batch_size: 1, vae_tile_size: 320, scale_method: 'lanczos', crop_mode: 'center' } },
-  '20': { class_type: 'KSamplerAdvanced', inputs: { model: '26', positive: '27', negative: '27', latent_image: '27', add_noise: 'enable', noise_seed: '{{seed}}', steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'normal', start_at_step: 0, end_at_step: 2, return_with_leftover_noise: 'enable' } },
-  '24': { class_type: 'KSamplerAdvanced', inputs: { model: '25', positive: '27', negative: '27', latent_image: '20', add_noise: 'disable', noise_seed: 0, steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'normal', start_at_step: 2, end_at_step: 4, return_with_leftover_noise: 'disable' } },
-  '21': { class_type: 'VAEDecodeTiled', inputs: { samples: '24', vae: '9', tile_size: 320, overlap: 32, temporal_size: 84, temporal_overlap: 8 } },
-  '22': { class_type: 'VHS_VideoCombine', inputs: { images: '21', frame_rate: 16, loop_count: 0, filename_prefix: '{{prefix}}', format: 'video/h264-mp4', pingpong: false, save_output: true, pix_fmt: 'yuv420p', crf: 15, save_metadata: false, trim_to_audio: false } },
+  '18': { class_type: 'CLIPTextEncode', inputs: { clip: ['32', 0], text: '{{negative}}' } },
+  '29': { class_type: 'CLIPTextEncode', inputs: { clip: ['32', 0], text: '{{prompt}}' } },
+  '16': { class_type: 'PathchSageAttentionKJ', inputs: { model: ['30', 0], sage_attention: 'sageattn_qk_int8_pv_fp16_triton', allow_compile: false } },
+  '17': { class_type: 'PathchSageAttentionKJ', inputs: { model: ['31', 0], sage_attention: 'sageattn_qk_int8_pv_fp16_triton', allow_compile: false } },
+  '4': { class_type: 'ModelSamplingSD3', inputs: { model: ['16', 0], shift: 5.0 } },
+  '15': { class_type: 'ModelSamplingSD3', inputs: { model: ['17', 0], shift: 5.0 } },
+  '26': { class_type: 'XB_UNetBlockSwap', inputs: { unet_model: ['15', 0], blocks_to_swap: 10 } },
+  '25': { class_type: 'XB_UNetBlockSwap', inputs: { unet_model: ['4', 0], blocks_to_swap: 10 } },
+  '27': { class_type: 'XB_WanImageToVideo', inputs: { positive: ['29', 0], negative: ['18', 0], vae: ['9', 0], start_image: ['23', 0], width: 480, height: 848, length: 49, batch_size: 1, vae_tile_size: 320, scale_method: 'lanczos', crop_mode: 'center' } },
+  '20': { class_type: 'KSamplerAdvanced', inputs: { model: ['26', 0], positive: ['27', 0], negative: ['27', 0], latent_image: ['27', 2], add_noise: 'enable', noise_seed: '{{seed}}', steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'normal', start_at_step: 0, end_at_step: 2, return_with_leftover_noise: 'enable' } },
+  '24': { class_type: 'KSamplerAdvanced', inputs: { model: ['25', 0], positive: ['27', 0], negative: ['27', 0], latent_image: ['20', 0], add_noise: 'disable', noise_seed: 0, steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'normal', start_at_step: 2, end_at_step: 4, return_with_leftover_noise: 'disable' } },
+  '21': { class_type: 'VAEDecodeTiled', inputs: { samples: ['24', 0], vae: ['9', 0], tile_size: 320, overlap: 32, temporal_size: 84, temporal_overlap: 8 } },
+  '22': { class_type: 'VHS_VideoCombine', inputs: { images: ['21', 0], frame_rate: 16, loop_count: 0, filename_prefix: '{{prefix}}', format: 'video/h264-mp4', pingpong: false, save_output: true, pix_fmt: 'yuv420p', crf: 15, save_metadata: false, trim_to_audio: false } },
 };
 
 export function buildI2vGraph(opts: {
