@@ -158,14 +158,21 @@ export function createGenRouter(
     const storagePath = `${job.promptId}/${assetId}.mp4`;
     const dest = storagePathToFs(uploadsDir, storagePath);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, bytes);
+    // Write through a Buffer copy and verify on disk: an undici-backed
+    // Uint8Array view can lie about its length if the ArrayBuffer detaches.
+    const payload = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    fs.writeFileSync(dest, payload);
+    const stat = fs.statSync(dest);
+    if (stat.size !== bytes.byteLength) {
+      throw new Error(`short write: ${stat.size} of ${bytes.byteLength} bytes`);
+    }
     return assetRepo.create({
       promptId: job.promptId,
       kind: 'video',
       fileName: fileName.replace(/\.[^.]*$/, '') + '.mp4',
       storagePath,
       metadata: {
-        size: bytes.length,
+        size: stat.size,
         mimeType: mime.startsWith('video/') ? mime : 'video/mp4',
         i2vOf: job.sourceAssetId,
       },

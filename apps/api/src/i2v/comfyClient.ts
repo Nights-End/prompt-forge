@@ -118,7 +118,10 @@ export class ComfyClient {
         { signal: controller.signal },
       );
       if (!res.ok) throw new Error(`view failed (${res.status})`);
+      // Fully materialise the body: writeFile of a bare undici buffer view
+      // can write 0 bytes if the ArrayBuffer is detached or a stream ref.
       const buf = new Uint8Array(await res.arrayBuffer());
+      if (buf.length === 0) throw new Error('empty video payload');
       const mime = res.headers.get('content-type') ?? 'video/mp4';
       return { bytes: buf, mime };
     } finally {
