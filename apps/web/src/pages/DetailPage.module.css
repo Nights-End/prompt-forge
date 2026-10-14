@@ -543,3 +543,70 @@
   padding: 3px 10px;
   border-radius: 6px;
 }
+
+/* ---- i2v(动起来) ---- */
+.i2vRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  min-height: 26px;
+}
+
+.i2vBtn {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  background: var(--accent, #4a7dbd);
+  color: #fff;
+  border: none;
+}
+
+.i2vBtn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.i2vProgress {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.i2vError {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #e5484d;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.videoCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.videoPlayer {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  background: #000;
+  border-radius: 8px;
+}
+
+.videoMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.videoName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

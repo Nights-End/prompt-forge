@@ -10,6 +10,8 @@ import { createAssetsRouter } from './routes/assets.js';
 import { createSettingsRouter } from './routes/settings.js';
 import { createLlmRouter } from './routes/llm.js';
 import { createWorkshopRouter } from './routes/workshop.js';
+import { GenJobRepository } from './db/genJobs.js';
+import { createGenRouter } from './i2v/router.js';
 import { loadExtConfig } from './ext/config.js';
 import { createExtGuard } from './ext/middleware.js';
 import { createExtRouter } from './ext/router.js';
@@ -23,6 +25,7 @@ export function createApp(deps: { fetchImpl?: typeof fetch } = {}) {
   const assetRepo = new AssetRepository(db);
   const extDedupeRepo = new ExtDedupeRepository(db);
   const conversationRepo = new ConversationRepository(db);
+  const genJobRepo = new GenJobRepository(db);
   const uploadsDir = resolveUploadsDir();
 
   // /api/ext boundary config (origin allow-list + token hash) is read once per
@@ -47,6 +50,10 @@ export function createApp(deps: { fetchImpl?: typeof fetch } = {}) {
   app.use('/api/settings', createSettingsRouter());
   app.use('/api/llm', createLlmRouter());
   app.use('/api/workshop', createWorkshopRouter(conversationRepo, { workshopConfig: loadWorkshopConfig() }));
+
+  // Image → video line: submit to the local ComfyUI (Wan2.2 GGUF I2V),
+  // poll its queue, and collect the finished mp4 back as a video asset.
+  app.use('/api/gen', createGenRouter(repo, assetRepo, genJobRepo, uploadsDir));
 
   // Write-only surface for the SillyTavern extension: loopback-only binding +
   // origin allow-list + shared token, all enforced by extGuard.

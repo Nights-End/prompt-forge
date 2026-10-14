@@ -117,6 +117,23 @@ const MIGRATIONS: string[] = [
 
     CREATE INDEX IF NOT EXISTS idx_ext_dedupe_contentHash ON ext_dedupe(contentHash);
   `,
+  // v10: i2v video generation jobs (image → Wan2.2 video via ComfyUI)
+  `
+    CREATE TABLE IF NOT EXISTS gen_jobs (
+      id            TEXT PRIMARY KEY,
+      promptId      TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+      sourceAssetId TEXT NOT NULL,
+      comfyPromptId TEXT,
+      status        TEXT NOT NULL DEFAULT 'pending',
+      error         TEXT,
+      outputAssetId TEXT,
+      createdAt     TEXT NOT NULL,
+      updatedAt     TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_gen_jobs_asset ON gen_jobs(sourceAssetId);
+    CREATE INDEX IF NOT EXISTS idx_gen_jobs_status ON gen_jobs(status);
+  `,
 ];
 
 function migrate(db: Database.Database): void {

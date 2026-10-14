@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import {
   Asset,
+  GenJobView,
   Prompt,
   extractVariables,
   getAssetGenParams,
@@ -47,6 +48,9 @@ function AssetThumb({
   onDragEnd,
   onDrop,
   onDelete,
+  i2vJob,
+  i2vBusy,
+  onStartI2v,
 }: {
   asset: Asset;
   dragging: boolean;
@@ -54,11 +58,16 @@ function AssetThumb({
   onDragEnd: () => void;
   onDrop: () => void;
   onDelete: () => void;
+  i2vJob?: GenJobView;
+  i2vBusy?: boolean;
+  onStartI2v: () => void;
 }) {
   const url = api.assetFileUrl(asset.id);
   const genParams = getAssetGenParams(asset);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const jobActive =
+    i2vJob?.status === 'pending' || i2vJob?.status === 'running';
   return (
     <div
       className={dragging ? styles.assetCardDragging : styles.assetCard}
@@ -80,6 +89,35 @@ function AssetThumb({
         <a href={url} target="_blank" rel="noreferrer" className={styles.assetFile} draggable={false}>
           {asset.fileName}
         </a>
+      )}
+      {asset.kind === 'image' && (
+        <div className={styles.i2vRow}>
+          {jobActive ? (
+            <span className={styles.i2vProgress} title={i2vJob?.error ?? undefined}>
+              {i2vJob?.status === 'pending' ? '视频排队中…' : '视频生成中… 约13分钟'}
+              {i2vJob?.queue ? ` (ComfyUI 队列: ${i2vJob.queue.running}跑/${i2vJob.queue.pending}等)` : ''}
+            </span>
+          ) : (
+            <button
+              type="button"
+              className={styles.i2vBtn}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onStartI2v();
+              }}
+              disabled={i2vBusy}
+              title="用 Wan2.2 把这张图转成 3 秒视频(约13分钟)"
+            >
+              {i2vBusy ? '提交中…' : '▶ 动起来'}
+            </button>
+          )}
+        </div>
+      )}
+      {i2vJob?.status === 'failed' && (
+        <div className={styles.i2vError} title={i2vJob.error ?? undefined}>
+          视频失败:{i2vJob.error ?? '未知错误'}
+        </div>
       )}
       {onDelete && (
         <button
@@ -133,6 +171,29 @@ function AssetThumb({
   );
 }
 
+function VideoCard({ asset, onDelete }: { asset: Asset; onDelete: () => void }) {
+  const url = api.assetFileUrl(asset.id);
+  return (
+    <div className={styles.videoCard}>
+      <video
+        className={styles.videoPlayer}
+        src={url}
+        controls
+        loop
+        muted
+        playsInline
+        preload="metadata"
+      />
+      <div className={styles.videoMeta}>
+        <span className={styles.videoName}>{asset.fileName}</span>
+        <button className={styles.assetDelete} onClick={onDelete} aria-label="删除视频">
+          ✕
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function DetailPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
@@ -157,6 +218,59 @@ export default function DetailPage() {
     variables: { name: string; values: string[] }[];
   } | null>(null);
   const [templatizeError, setTemplatizeError] = useState('');
+
+  // i2v:assetId → job 视图;轮询未完结任务,成功后刷新资产列表
+  const [i2vJobs, setI2vJobs] = useState<Record<string, GenJobView>>({});
+  const [i2vBusy, setI2vBusy] = useState<Set<string>>(new Set());
+
+  const refreshAssets = useCallback(async () => {
+    try {
+      setAssets(await api.listAssets(id));
+    } catch {
+      // best-effort refresh
+    }
+  }, [id]);
+
+  const activeJobIds = Object.values(i2vJobs)
+    .filter((j) => j.status === 'pending' || j.status === 'running')
+    .map((j) => j.id);
+
+  useEffect(() => {
+    if (activeJobIds.length === 0) return;
+    const timer = setInterval(async () => {
+      const updates = await Promise.allSettled(
+        activeJobIds.map((jid) => api.getGenJob(jid)),
+      );
+      let anyActive = false;
+      const next: Record<string, GenJobView> = {};
+      for (const r of updates) {
+        if (r.status !== 'fulfilled') continue;
+        const job = r.value;
+        next[job.sourceAssetId] = job;
+        if (job.status === 'pending' || job.status === 'running') anyActive = true;
+      }
+      setI2vJobs((prev) => ({ ...prev, ...next }));
+      if (!anyActive) refreshAssets();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [activeJobIds.join(','), refreshAssets]);
+
+  async function handleStartI2v(assetId: string) {
+    if (i2vBusy.has(assetId)) return;
+    setI2vBusy((prev) => new Set(prev).add(assetId));
+    try {
+      const job = await api.startI2v(assetId);
+      setI2vJobs((prev) => ({ ...prev, [assetId]: job }));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '提交失败');
+    } finally {
+      setI2vBusy((prev) => {
+        const s = new Set(prev);
+        s.delete(assetId);
+        return s;
+      });
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -437,15 +551,22 @@ export default function DetailPage() {
       {assets.length > 0 && (
         <div className={styles.assets}>
           {assets.map((a, i) => (
-            <AssetThumb
-              key={a.id}
-              asset={a}
-              dragging={dragIndex === i}
-              onDragStart={() => setDragIndex(i)}
-              onDragEnd={() => setDragIndex(null)}
-              onDrop={() => handleDrop(i)}
-              onDelete={() => handleDeleteAsset(a.id)}
-            />
+            a.kind === 'video' ? (
+              <VideoCard key={a.id} asset={a} onDelete={() => handleDeleteAsset(a.id)} />
+            ) : (
+              <AssetThumb
+                key={a.id}
+                asset={a}
+                dragging={dragIndex === i}
+                onDragStart={() => setDragIndex(i)}
+                onDragEnd={() => setDragIndex(null)}
+                onDrop={() => handleDrop(i)}
+                onDelete={() => handleDeleteAsset(a.id)}
+                i2vJob={i2vJobs[a.id]}
+                i2vBusy={i2vBusy.has(a.id)}
+                onStartI2v={() => handleStartI2v(a.id)}
+              />
+            )
           ))}
         </div>
       )}

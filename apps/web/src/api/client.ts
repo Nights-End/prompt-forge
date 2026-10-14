@@ -3,6 +3,7 @@ import type {
   Conversation,
   ConversationMessage,
   CreateConversationInput,
+  GenJobView,
   Preset,
   Prompt,
   PromptInput,
@@ -127,6 +128,20 @@ export const api = {
       body: JSON.stringify({ assetIds }),
     }),
   assetFileUrl: (assetId: string) => `${BASE}/assets/${assetId}/file`,
+  genStatus: () =>
+    request<{
+      comfyReachable: boolean;
+      activeJobs: number;
+      queue?: { running: number; pending: number };
+    }>('/gen/status'),
+  startI2v: (assetId: string, force = false) =>
+    request<GenJobView & { reused?: boolean }>(
+      `/gen/assets/${assetId}/i2v${force ? '?force=1' : ''}`,
+      { method: 'POST' },
+    ),
+  getGenJob: (jobId: string) => request<GenJobView>(`/gen/jobs/${jobId}`),
+  cancelGenJob: (jobId: string) =>
+    request<GenJobView>(`/gen/jobs/${jobId}`, { method: 'DELETE' }),
   exportZip: async (): Promise<Blob> => {
     const res = await fetch(`${BASE}/export`);
     if (!res.ok) throw new Error(`Export failed (${res.status})`);

@@ -1,6 +1,6 @@
 export type PromptType = 'text' | 'multimodal';
 
-export type AssetKind = 'image' | 'audio' | 'file';
+export type AssetKind = 'image' | 'audio' | 'video' | 'file';
 
 export interface PromptParameters {
   model?: string;
@@ -50,6 +50,21 @@ export interface Asset {
   metadata?: Record<string, unknown>;
   sortOrder: number;
   createdAt: string;
+}
+
+export type GenJobStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
+
+export interface GenJobView {
+  id: string;
+  promptId: string;
+  sourceAssetId: string;
+  status: GenJobStatus;
+  error: string | null;
+  outputAssetId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  queue?: { running: number; pending: number };
+  reused?: boolean;
 }
 
 export function getAssetGenParams(asset: Asset): PromptParameters {
