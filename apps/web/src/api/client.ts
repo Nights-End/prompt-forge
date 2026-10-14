@@ -134,11 +134,16 @@ export const api = {
       activeJobs: number;
       queue?: { running: number; pending: number };
     }>('/gen/status'),
-  startI2v: (assetId: string, force = false) =>
-    request<GenJobView & { reused?: boolean }>(
-      `/gen/assets/${assetId}/i2v${force ? '?force=1' : ''}`,
+  startI2v: (assetId: string, force = false, quality: 'fast' | 'hq' = 'fast') => {
+    const params = new URLSearchParams();
+    if (force) params.set('force', '1');
+    if (quality === 'hq') params.set('quality', 'hq');
+    const qs = params.toString();
+    return request<GenJobView & { reused?: boolean }>(
+      `/gen/assets/${assetId}/i2v${qs ? `?${qs}` : ''}`,
       { method: 'POST' },
-    ),
+    );
+  },
   getGenJob: (jobId: string) => request<GenJobView>(`/gen/jobs/${jobId}`),
   cancelGenJob: (jobId: string) =>
     request<GenJobView>(`/gen/jobs/${jobId}`, { method: 'DELETE' }),

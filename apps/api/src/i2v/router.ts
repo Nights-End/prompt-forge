@@ -5,6 +5,7 @@ import { Router } from 'express';
 import type { PromptRepository } from '../db/prompts.js';
 import type { AssetRepository } from '../db/assets.js';
 import type { GenJobRepository, GenJob } from '../db/genJobs.js';
+import type { I2vQuality } from './template.js';
 import { ComfyClient } from './comfyClient.js';
 import {
   buildI2vGraph,
@@ -21,6 +22,7 @@ export interface GenJobView {
   status: GenJob['status'];
   error: string | null;
   outputAssetId: string | null;
+  quality: GenJob['quality'];
   createdAt: string;
   updatedAt: string;
   /** 队列信息(有 ComfyUI 时) */
@@ -35,6 +37,7 @@ function toView(job: GenJob, queue?: { running: number; pending: number }): GenJ
     status: job.status,
     error: job.error,
     outputAssetId: job.outputAssetId,
+    quality: job.quality,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     queue,
@@ -143,6 +146,7 @@ export function createGenRouter(
       prompt: prompt.content,
       seed: Number(seed % 2305843009213693951n), // < 2^53
       prefix: `forge-i2v/${job.id.slice(0, 8)}`,
+      quality: job.quality,
     });
     const submitted = await comfy.submit(graph);
     jobRepo.update(job.id, { comfyPromptId: submitted.promptId, status: 'running' });
@@ -229,6 +233,7 @@ export function createGenRouter(
       res.status(404).json({ error: 'prompt not found' });
       return;
     }
+    const quality: I2vQuality = req.query.quality === 'hq' ? 'hq' : 'fast';
 
     // Dedupe: an active job already exists for this image → return it (200).
     const active = jobRepo.getActiveByAsset(asset.id);
@@ -256,7 +261,7 @@ export function createGenRouter(
       return;
     }
 
-    const job = jobRepo.create({ promptId: prompt.id, sourceAssetId: asset.id });
+    const job = jobRepo.create({ promptId: prompt.id, sourceAssetId: asset.id, quality });
     ensurePolling();
     // Kick the first poll immediately so submission errors surface fast.
     const fresh = jobRepo.getById(job.id);

@@ -6,6 +6,8 @@ export const POLL_INTERVAL_MS = 5_000;
 export const STALE_PENDING_MS = 60 * 60 * 1000; // 1h:重启对账时,missing 且超龄的 pending → failed
 export const MAX_ACTIVE_JOBS = 3; // 同一 ComfyUI 上并行的 forge 视频任务上限(每个 ~13 分钟)
 
+export type I2vQuality = 'fast' | 'hq';
+
 type ComfyNode = { class_type: string; inputs: Record<string, unknown> };
 export type ComfyPromptGraph = Record<string, ComfyNode>;
 
@@ -14,7 +16,7 @@ export type ComfyPromptGraph = Record<string, ComfyNode>;
 // 占位符:{{image}} {{prompt}} {{negative}} {{seed}} {{prefix}}
 // 注意:ComfyUI API 图的节点引用必须是 [nodeId, slot](裸字符串会被当值传进节点,
 // 报 'str' object has no attribute 'cpu')。20.latent_image 特例取 27 的 2 号槽(latent)。
-const TEMPLATE: ComfyPromptGraph = {
+const TEMPLATE_FAST: ComfyPromptGraph = {
   '30': { class_type: 'UnetLoaderGGUF', inputs: { unet_name: 'Wan2.2\\I2V\\Wan2.2_I2V_Dasiwa-V10_Q4_High.gguf' } },
   '31': { class_type: 'UnetLoaderGGUF', inputs: { unet_name: 'Wan2.2\\I2V\\Wan2.2_I2V_Dasiwa-V10_Q4_Low.gguf' } },
   '32': { class_type: 'CLIPLoaderGGUF', inputs: { clip_name: 'Wan2.2\\umt5-xxl-encoder-Q4_K_M.gguf', type: 'wan' } },
@@ -36,14 +38,44 @@ const TEMPLATE: ComfyPromptGraph = {
   '22': { class_type: 'VHS_VideoCombine', inputs: { images: ['21', 0], frame_rate: 16, loop_count: 0, filename_prefix: '{{prefix}}', format: 'video/h264-mp4', pingpong: false, save_output: true, pix_fmt: 'yuv420p', crf: 15, save_metadata: false, trim_to_audio: false } },
 };
 
-export function buildI2vGraph(opts: {
-  image: string;
-  prompt: string;
-  seed: number;
-  prefix: string;
-  negative?: string;
-}): ComfyPromptGraph {
-  const graph = JSON.parse(JSON.stringify(TEMPLATE)) as ComfyPromptGraph;
+// 画质档:fp8 Enhanced-CameraPrompt(2026-08 用户实际用过的组合,清晰度 3 倍于 Q4 GGUF,
+// 实测对照 2026-10-14:8月 fp8 lap=134 vs GGUF 42/35)。与 8 月工作流的差异对齐:
+// UNETLoader + CLIPLoader(fp8)、SageAttention 关、scheduler=simple。
+// 代价:~35 分钟/3 秒(慢 2.7 倍)。
+const TEMPLATE_HQ: ComfyPromptGraph = {
+  '30': { class_type: 'UNETLoader', inputs: { unet_name: 'Wan2.2\\I2V\\Wan2.2_Enhanced-CameraPrompt_FastMove_High_FP8_NSFW.safetensors', weight_dtype: 'default' } },
+  '31': { class_type: 'UNETLoader', inputs: { unet_name: 'Wan2.2\\I2V\\Wan2.2_Enhanced-CameraPrompt_FastMove_Low_FP8_NSFW.safetensors', weight_dtype: 'default' } },
+  '32': { class_type: 'CLIPLoader', inputs: { clip_name: 'Wan2.2\\umt5_xxl_fp8_e4m3fn_scaled.safetensors', type: 'wan', device: 'default' } },
+  '9': { class_type: 'VAELoader', inputs: { vae_name: 'Wan2.2\\wan_2.1_vae.safetensors' } },
+  '23': { class_type: 'LoadImage', inputs: { image: '{{image}}' } },
+  '44': { class_type: 'PrimitiveStringMultiline', inputs: { value: '{{prompt}}' } },
+  '18': { class_type: 'CLIPTextEncode', inputs: { clip: ['32', 0], text: '{{negative}}' } },
+  '29': { class_type: 'CLIPTextEncode', inputs: { clip: ['32', 0], text: '{{prompt}}' } },
+  '16': { class_type: 'PathchSageAttentionKJ', inputs: { model: ['30', 0], sage_attention: 'disabled', allow_compile: false } },
+  '17': { class_type: 'PathchSageAttentionKJ', inputs: { model: ['31', 0], sage_attention: 'disabled', allow_compile: false } },
+  '4': { class_type: 'ModelSamplingSD3', inputs: { model: ['16', 0], shift: 5.0 } },
+  '15': { class_type: 'ModelSamplingSD3', inputs: { model: ['17', 0], shift: 5.0 } },
+  '26': { class_type: 'XB_UNetBlockSwap', inputs: { unet_model: ['15', 0], blocks_to_swap: 10 } },
+  '25': { class_type: 'XB_UNetBlockSwap', inputs: { unet_model: ['4', 0], blocks_to_swap: 10 } },
+  '27': { class_type: 'XB_WanImageToVideo', inputs: { positive: ['29', 0], negative: ['18', 0], vae: ['9', 0], start_image: ['23', 0], width: 480, height: 848, length: 49, batch_size: 1, vae_tile_size: 320, scale_method: 'lanczos', crop_mode: 'center' } },
+  '20': { class_type: 'KSamplerAdvanced', inputs: { model: ['26', 0], positive: ['27', 0], negative: ['27', 0], latent_image: ['27', 2], add_noise: 'enable', noise_seed: '{{seed}}', steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'simple', start_at_step: 0, end_at_step: 2, return_with_leftover_noise: 'enable' } },
+  '24': { class_type: 'KSamplerAdvanced', inputs: { model: ['25', 0], positive: ['27', 0], negative: ['27', 0], latent_image: ['20', 0], add_noise: 'disable', noise_seed: 0, steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'simple', start_at_step: 2, end_at_step: 4, return_with_leftover_noise: 'disable' } },
+  '21': { class_type: 'VAEDecodeTiled', inputs: { samples: ['24', 0], vae: ['9', 0], tile_size: 320, overlap: 32, temporal_size: 84, temporal_overlap: 8 } },
+  '22': { class_type: 'VHS_VideoCombine', inputs: { images: ['21', 0], frame_rate: 16, loop_count: 0, filename_prefix: '{{prefix}}', format: 'video/h264-mp4', pingpong: false, save_output: true, pix_fmt: 'yuv420p', crf: 15, save_metadata: false, trim_to_audio: false } },
+};
+
+export function buildI2vGraph(
+  opts: {
+    image: string;
+    prompt: string;
+    seed: number;
+    prefix: string;
+    negative?: string;
+    quality?: I2vQuality;
+  },
+): ComfyPromptGraph {
+  const template = opts.quality === 'hq' ? TEMPLATE_HQ : TEMPLATE_FAST;
+  const graph = JSON.parse(JSON.stringify(template)) as ComfyPromptGraph;
   const fill = (v: unknown) => {
     if (typeof v !== 'string') return v;
     return v

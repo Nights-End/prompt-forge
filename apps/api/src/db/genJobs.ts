@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 
 export type GenJobStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
+export type GenJobQuality = 'fast' | 'hq';
 
 export interface GenJob {
   id: string;
@@ -11,6 +12,7 @@ export interface GenJob {
   status: GenJobStatus;
   error: string | null;
   outputAssetId: string | null;
+  quality: GenJobQuality;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,20 +25,22 @@ interface JobRow {
   status: string;
   error: string | null;
   outputAssetId: string | null;
+  quality: string;
   createdAt: string;
   updatedAt: string;
 }
 
 function rowToJob(row: JobRow): GenJob {
-  return { ...row, status: row.status as GenJobStatus };
+  return { ...row, status: row.status as GenJobStatus, quality: row.quality as GenJobQuality };
 }
 
-const COLUMNS = 'id, promptId, sourceAssetId, comfyPromptId, status, error, outputAssetId, createdAt, updatedAt';
+const COLUMNS =
+  'id, promptId, sourceAssetId, comfyPromptId, status, error, outputAssetId, quality, createdAt, updatedAt';
 
 export class GenJobRepository {
   constructor(private db: Database.Database) {}
 
-  create(input: { promptId: string; sourceAssetId: string }): GenJob {
+  create(input: { promptId: string; sourceAssetId: string; quality?: GenJobQuality }): GenJob {
     const now = new Date().toISOString();
     const row: JobRow = {
       id: randomUUID(),
@@ -46,15 +50,16 @@ export class GenJobRepository {
       status: 'pending',
       error: null,
       outputAssetId: null,
+      quality: input.quality ?? 'fast',
       createdAt: now,
       updatedAt: now,
     };
     this.db
       .prepare(
         `INSERT INTO gen_jobs
-           (id, promptId, sourceAssetId, comfyPromptId, status, error, outputAssetId, createdAt, updatedAt)
+           (id, promptId, sourceAssetId, comfyPromptId, status, error, outputAssetId, quality, createdAt, updatedAt)
          VALUES
-           (@id, @promptId, @sourceAssetId, @comfyPromptId, @status, @error, @outputAssetId, @createdAt, @updatedAt)`,
+           (@id, @promptId, @sourceAssetId, @comfyPromptId, @status, @error, @outputAssetId, @quality, @createdAt, @updatedAt)`,
       )
       .run(row);
     return rowToJob(row);

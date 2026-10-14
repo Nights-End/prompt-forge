@@ -569,6 +569,10 @@
   cursor: wait;
 }
 
+.i2vBtnHq {
+  background: #8a5fbf;
+}
+
 .i2vProgress {
   font-size: 12px;
   opacity: 0.8;

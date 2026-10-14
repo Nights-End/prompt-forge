@@ -61,6 +61,7 @@ export interface GenJobView {
   status: GenJobStatus;
   error: string | null;
   outputAssetId: string | null;
+  quality?: 'fast' | 'hq';
   createdAt: string;
   updatedAt: string;
   queue?: { running: number; pending: number };

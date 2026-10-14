@@ -134,6 +134,9 @@ const MIGRATIONS: string[] = [
     CREATE INDEX IF NOT EXISTS idx_gen_jobs_asset ON gen_jobs(sourceAssetId);
     CREATE INDEX IF NOT EXISTS idx_gen_jobs_status ON gen_jobs(status);
   `,
+  // v11: quality column for i2v jobs ('fast' = GGUF ~13min, 'hq' = fp8 ~35min).
+  // Must survive restarts: the poll loop resubmits from this column.
+  `ALTER TABLE gen_jobs ADD COLUMN quality TEXT NOT NULL DEFAULT 'fast';`,
 ];
 
 function migrate(db: Database.Database): void {

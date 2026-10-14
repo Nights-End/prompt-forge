@@ -60,7 +60,7 @@ function AssetThumb({
   onDelete: () => void;
   i2vJob?: GenJobView;
   i2vBusy?: boolean;
-  onStartI2v: () => void;
+  onStartI2v: (assetId: string, quality: 'fast' | 'hq') => void;
 }) {
   const url = api.assetFileUrl(asset.id);
   const genParams = getAssetGenParams(asset);
@@ -94,23 +94,38 @@ function AssetThumb({
         <div className={styles.i2vRow}>
           {jobActive ? (
             <span className={styles.i2vProgress} title={i2vJob?.error ?? undefined}>
-              {i2vJob?.status === 'pending' ? '视频排队中…' : '视频生成中… 约13分钟'}
+              {i2vJob?.status === 'pending' ? '视频排队中…' : i2vJob?.quality === 'hq' ? '画质档生成中… 约35分钟' : '视频生成中… 约13分钟'}
               {i2vJob?.queue ? ` (ComfyUI 队列: ${i2vJob.queue.running}跑/${i2vJob.queue.pending}等)` : ''}
             </span>
           ) : (
-            <button
-              type="button"
-              className={styles.i2vBtn}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onStartI2v();
-              }}
-              disabled={i2vBusy}
-              title="用 Wan2.2 把这张图转成 3 秒视频(约13分钟)"
-            >
-              {i2vBusy ? '提交中…' : '▶ 动起来'}
-            </button>
+            <>
+              <button
+                type="button"
+                className={styles.i2vBtn}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onStartI2v(asset.id, 'fast');
+                }}
+                disabled={i2vBusy}
+                title="Wan2.2 GGUF 快档:约13分钟,画质一般"
+              >
+                {i2vBusy ? '提交中…' : '▶ 动起来'}
+              </button>
+              <button
+                type="button"
+                className={`${styles.i2vBtn} ${styles.i2vBtnHq}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onStartI2v(asset.id, 'hq');
+                }}
+                disabled={i2vBusy}
+                title="fp8 画质档:约35分钟,清晰度约为快档3倍"
+              >
+                {i2vBusy ? '…' : '✦ 画质'}
+              </button>
+            </>
           )}
         </div>
       )}
@@ -255,11 +270,11 @@ export default function DetailPage() {
     return () => clearInterval(timer);
   }, [activeJobIds.join(','), refreshAssets]);
 
-  async function handleStartI2v(assetId: string) {
+  async function handleStartI2v(assetId: string, quality: 'fast' | 'hq' = 'fast') {
     if (i2vBusy.has(assetId)) return;
     setI2vBusy((prev) => new Set(prev).add(assetId));
     try {
-      const job = await api.startI2v(assetId);
+      const job = await api.startI2v(assetId, false, quality);
       setI2vJobs((prev) => ({ ...prev, [assetId]: job }));
     } catch (e) {
       alert(e instanceof Error ? e.message : '提交失败');
@@ -564,7 +579,7 @@ export default function DetailPage() {
                 onDelete={() => handleDeleteAsset(a.id)}
                 i2vJob={i2vJobs[a.id]}
                 i2vBusy={i2vBusy.has(a.id)}
-                onStartI2v={() => handleStartI2v(a.id)}
+                onStartI2v={handleStartI2v}
               />
             )
           ))}
