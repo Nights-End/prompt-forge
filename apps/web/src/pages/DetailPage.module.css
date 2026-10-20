@@ -292,8 +292,11 @@
   border-radius: var(--radius);
   overflow: hidden;
   min-height: 120px;
+  /* 纵向堆叠:图 → i2v 按钮行 → 参数区。原来是 row(设计上卡内只有一张图),
+     加了 i2v 按钮后横向排会把按钮挤进图里。 */
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   justify-content: center;
   transition: border-color 0.15s ease, transform 0.15s ease;
 }
@@ -325,6 +328,7 @@
   font-size: 13px;
   color: var(--accent-2);
   word-break: break-all;
+  text-align: center;
 }
 
 .assetDelete {
