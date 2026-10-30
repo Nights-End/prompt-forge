@@ -12,6 +12,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 const YES = args.includes('--yes');
@@ -20,7 +21,8 @@ const argOf = (name, fallback) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
 const API = argOf('--api', 'http://127.0.0.1:3200').replace(/\/$/, '');
-const UPLOADS = path.resolve(argOf('--uploads', '../../apps/api/data/uploads'));
+const HERE = path.dirname(fileURLToPath(import.meta.url)); // tools/
+const UPLOADS = path.resolve(argOf('--uploads', path.join(HERE, '..', 'apps/api/data/uploads')));
 
 const res = await fetch(`${API}/api/prompts?limit=5000`);
 if (!res.ok) {
