@@ -17,6 +17,7 @@ import { createExtGuard } from './ext/middleware.js';
 import { createExtRouter } from './ext/router.js';
 import { loadWorkshopConfig } from './workshop/config.js';
 import { resolveUploadsDir } from './uploads.js';
+import { pruneTrash } from './trash.js';
 
 export function createApp(deps: { fetchImpl?: typeof fetch } = {}) {
   const app = express();
@@ -32,6 +33,14 @@ export function createApp(deps: { fetchImpl?: typeof fetch } = {}) {
   // process; the plaintext token and the config both live in the data dir,
   // which .gitignore keeps out of the public repo.
   const extConfig = loadExtConfig(resolveDataDir());
+
+  // 回收站保留期外的东西在启动时清一次:服务是常驻的,不靠定时器
+  try {
+    const pruned = pruneTrash(uploadsDir);
+    if (pruned > 0) console.log(`trash: pruned ${pruned} expired file(s)`);
+  } catch (e) {
+    console.error('trash prune failed (non-fatal):', e);
+  }
 
   app.locals.db = db;
   app.locals.uploadsDir = uploadsDir;

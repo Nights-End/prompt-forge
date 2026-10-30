@@ -14,6 +14,7 @@ import {
 } from '@prompt-forge/shared';
 import { parsePromptInput } from '../validation.js';
 import { storagePathToFs } from '../uploads.js';
+import { removeEmptyPromptDir, removePromptDir, trashAssets } from '../trash.js';
 import { pickProviderId } from './llm.js';
 import { resolveProviderConfigPath } from '../llm/config.js';
 import {
@@ -380,9 +381,15 @@ export function createPromptsRouter(
       res.status(404).json({ error: 'not found' });
       return;
     }
+    // 先挪进回收站(文件还在),再删记录:留一条可恢复的路子
+    trashAssets(uploadsDir, {
+      promptId: asset.promptId,
+      prompt: null,
+      assets: [asset],
+      reason: 'asset',
+    });
     assetRepo.delete(asset.id);
-    const filePath = storagePathToFs(uploadsDir, asset.storagePath);
-    fs.rmSync(filePath, { force: true });
+    removeEmptyPromptDir(uploadsDir, asset.promptId);
     res.status(204).end();
   });
 
@@ -408,16 +415,20 @@ export function createPromptsRouter(
   });
 
   router.delete('/:id', (req, res) => {
+    const prompt = repo.getById(req.params.id);
+    if (!prompt) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
     const assets = assetRepo.listByPrompt(req.params.id);
+    // 先挪进回收站,再删记录与目录 —— 删错了还能按 manifest 放回去
+    trashAssets(uploadsDir, { promptId: prompt.id, prompt, assets, reason: 'prompt' });
     const ok = repo.delete(req.params.id);
     if (!ok) {
       res.status(404).json({ error: 'not found' });
       return;
     }
-    for (const asset of assets) {
-      const filePath = storagePathToFs(uploadsDir, asset.storagePath);
-      fs.rmSync(filePath, { force: true });
-    }
+    removePromptDir(uploadsDir, prompt.id);
     res.status(204).end();
   });
 
